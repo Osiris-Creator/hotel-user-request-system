@@ -1,0 +1,31 @@
+{
+  "name": "hotel-user-request-system",
+  "version": "2.0.0",
+  "description": "Hotel User Access Request Management System on Cloudflare",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute hotel-user-request-db --file=./schema.sql",
+    "db:seed": "wrangler d1 execute hotel-user-request-db --file=./seed.sql",
+    "db:create": "wrangler d1 create hotel-user-request-db",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "d1",
+    "hotel-management"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "husky": "^9.1.7",
+    "typescript": "^5.7.3",
+    "wrangler": "^3.95.0"
+  },
+  "dependencies": {
+    "hono": "^4.7.11"
+  }
+}

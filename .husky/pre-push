@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🚀 Deploying to Cloudflare..."
+
+# Deploy Worker
+echo "📦 Deploying Worker..."
+npm run deploy
+
+# Deploy Pages
+echo "🌐 Deploying Pages..."
+npx wrangler pages deploy public --project-name=hotel-request-ui
+
+echo "✅ Auto-deploy completed!"

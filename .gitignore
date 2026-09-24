@@ -1,0 +1,19 @@
+.DS_Store
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+.wrangler/
+dist/
+.cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
