@@ -82,6 +82,9 @@
         <button class="tab-btn admin-only" data-tab="users">
           👥 User Management
         </button>
+        <button class="tab-btn admin-only" data-tab="programs">
+          💻 Programs & Roles
+        </button>
         <button class="tab-btn admin-only" data-tab="audit">
           🔍 Audit Log
         </button>
@@ -259,6 +262,23 @@
         </div>
       </div>
 
+      <!-- Programs & Roles Management Tab (Admin Only) -->
+      <div id="programs-tab" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">💻 Programs & Roles Management</h2>
+            <button id="add-program-btn-mgmt" class="btn btn-primary">➕ Add Program</button>
+          </div>
+
+          <div id="programs-mgmt-list" style="margin-top: 24px;">
+            <div class="loading">
+              <div class="spinner"></div>
+              <p>Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Audit Log Tab (Admin Only) -->
       <div id="audit-tab" class="tab-content">
         <div class="card">
@@ -369,6 +389,75 @@
               ✅ Save
             </button>
             <button type="button" class="btn btn-secondary" id="user-cancel-btn">
+              ❌ Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Program Management Modal -->
+  <div id="program-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="program-modal-title">Add New Program</h2>
+        <button class="modal-close" id="program-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="program-form">
+          <input type="hidden" id="program-id">
+
+          <div class="form-group">
+            <label for="program-name">Program Name *</label>
+            <input type="text" id="program-name" name="name" required placeholder="e.g., Opera PMS">
+          </div>
+
+          <div class="form-group">
+            <label for="program-description">Description</label>
+            <textarea id="program-description" name="description" rows="3" placeholder="Program description (optional)"></textarea>
+          </div>
+
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button type="submit" class="btn btn-primary">
+              ✅ Save Program
+            </button>
+            <button type="button" class="btn btn-secondary" id="program-cancel-btn">
+              ❌ Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Role Management Modal -->
+  <div id="role-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="role-modal-title">Add New Role</h2>
+        <button class="modal-close" id="role-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="role-form">
+          <input type="hidden" id="role-id">
+          <input type="hidden" id="role-program-id">
+
+          <div class="form-group">
+            <label for="role-name">Role Name *</label>
+            <input type="text" id="role-name" name="role_name" required placeholder="e.g., Front Desk Agent">
+          </div>
+
+          <div class="form-group">
+            <label for="role-description">Description</label>
+            <textarea id="role-description" name="description" rows="3" placeholder="Role description (optional)"></textarea>
+          </div>
+
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button type="submit" class="btn btn-primary">
+              ✅ Save Role
+            </button>
+            <button type="button" class="btn btn-secondary" id="role-cancel-btn">
               ❌ Cancel
             </button>
           </div>

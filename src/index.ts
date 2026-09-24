@@ -313,6 +313,184 @@ app.get('/api/audit', async (c) => {
 });
 
 // ============================================
+// PROGRAM & ROLE MANAGEMENT (ADMIN ONLY)
+// ============================================
+
+// Create new program
+app.post('/api/programs', async (c) => {
+  try {
+    const { name, description, createdBy } = await c.req.json();
+
+    const result = await c.env.DB.prepare(
+      'INSERT INTO programs (name, description) VALUES (?, ?)'
+    ).bind(name, description || '').run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('CREATE_PROGRAM', createdBy, `Created program: ${name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Program created successfully', id: result.meta.last_row_id });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to create program', error: error.message }, 500);
+  }
+});
+
+// Update program
+app.patch('/api/programs/:id', async (c) => {
+  try {
+    const programId = c.req.param('id');
+    const { name, description, updatedBy } = await c.req.json();
+
+    await c.env.DB.prepare(
+      'UPDATE programs SET name = ?, description = ? WHERE id = ?'
+    ).bind(name, description || '', programId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('UPDATE_PROGRAM', updatedBy, `Updated program ID ${programId}: ${name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Program updated successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to update program', error: error.message }, 500);
+  }
+});
+
+// Delete program
+app.delete('/api/programs/:id', async (c) => {
+  try {
+    const programId = c.req.param('id');
+    const { deletedBy } = await c.req.json();
+
+    // Check if program is used in any requests
+    const usedInRequests = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM request_programs WHERE program_id = ?'
+    ).bind(programId).first();
+
+    if (usedInRequests.count > 0) {
+      return c.json({
+        success: false,
+        message: 'Cannot delete program that is used in existing requests'
+      }, 400);
+    }
+
+    // Get program name for audit log
+    const program = await c.env.DB.prepare(
+      'SELECT name FROM programs WHERE id = ?'
+    ).bind(programId).first();
+
+    // Delete roles first
+    await c.env.DB.prepare(
+      'DELETE FROM roles WHERE program_id = ?'
+    ).bind(programId).run();
+
+    // Delete program
+    await c.env.DB.prepare(
+      'DELETE FROM programs WHERE id = ?'
+    ).bind(programId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('DELETE_PROGRAM', deletedBy, `Deleted program: ${program?.name || programId}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Program deleted successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to delete program', error: error.message }, 500);
+  }
+});
+
+// Create new role for a program
+app.post('/api/programs/:id/roles', async (c) => {
+  try {
+    const programId = c.req.param('id');
+    const { role_name, description, createdBy } = await c.req.json();
+
+    const result = await c.env.DB.prepare(
+      'INSERT INTO roles (program_id, role_name, description) VALUES (?, ?, ?)'
+    ).bind(programId, role_name, description || '').run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('CREATE_ROLE', createdBy, `Created role: ${role_name} for program ID ${programId}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Role created successfully', id: result.meta.last_row_id });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to create role', error: error.message }, 500);
+  }
+});
+
+// Update role
+app.patch('/api/programs/:programId/roles/:roleId', async (c) => {
+  try {
+    const programId = c.req.param('programId');
+    const roleId = c.req.param('roleId');
+    const { role_name, description, updatedBy } = await c.req.json();
+
+    await c.env.DB.prepare(
+      'UPDATE roles SET role_name = ?, description = ? WHERE id = ? AND program_id = ?'
+    ).bind(role_name, description || '', roleId, programId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('UPDATE_ROLE', updatedBy, `Updated role ID ${roleId}: ${role_name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Role updated successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to update role', error: error.message }, 500);
+  }
+});
+
+// Delete role
+app.delete('/api/programs/:programId/roles/:roleId', async (c) => {
+  try {
+    const programId = c.req.param('programId');
+    const roleId = c.req.param('roleId');
+    const { deletedBy } = await c.req.json();
+
+    // Check if role is used in any requests
+    const usedInRequests = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM request_programs WHERE role_id = ?'
+    ).bind(roleId).first();
+
+    if (usedInRequests.count > 0) {
+      return c.json({
+        success: false,
+        message: 'Cannot delete role that is used in existing requests'
+      }, 400);
+    }
+
+    // Get role name for audit log
+    const role = await c.env.DB.prepare(
+      'SELECT role_name FROM roles WHERE id = ?'
+    ).bind(roleId).first();
+
+    // Delete role
+    await c.env.DB.prepare(
+      'DELETE FROM roles WHERE id = ? AND program_id = ?'
+    ).bind(roleId, programId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('DELETE_ROLE', deletedBy, `Deleted role: ${role?.role_name || roleId}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Role deleted successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to delete role', error: error.message }, 500);
+  }
+});
+
+// ============================================
 // SYSTEM USERS MANAGEMENT (AUTHENTICATION)
 // ============================================
 

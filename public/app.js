@@ -113,6 +113,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       initReportDates();
     } else if (tabName === 'users') {
       loadSystemUsers();
+    } else if (tabName === 'programs') {
+      loadProgramsManagement();
     }
   });
 });
@@ -885,6 +887,274 @@ document.getElementById('user-modal-close')?.addEventListener('click', () => {
 document.getElementById('user-cancel-btn')?.addEventListener('click', () => {
   document.getElementById('user-modal').classList.remove('active');
   document.getElementById('user-username').disabled = false;
+});
+
+// Filter buttons
+document.getElementById('filter-btn')?.addEventListener('click', loadRequests);
+document.getElementById('audit-filter-btn')?.addEventListener('click', loadAuditLogs);
+
+// ============================================
+// PROGRAMS & ROLES MANAGEMENT
+// ============================================
+
+// Load programs management
+async function loadProgramsManagement() {
+  try {
+    const response = await fetch(`${API_URL}/api/programs`);
+    const data = await response.json();
+
+    if (data.success) {
+      const container = document.getElementById('programs-mgmt-list');
+      if (data.data.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--gray-500);">No programs found</p>';
+        return;
+      }
+
+      container.innerHTML = data.data.map(program => `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h3 style="margin: 0; font-size: 1.1rem;">${program.name}</h3>
+              ${program.description ? `<p style="margin: 4px 0 0; color: var(--gray-600); font-size: 0.9rem;">${program.description}</p>` : ''}
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" onclick="editProgram(${program.id}, '${program.name.replace(/'/g, "\\'")}', '${(program.description || '').replace(/'/g, "\\'")}')">
+                ✏️ Edit
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="deleteProgram(${program.id}, '${program.name.replace(/'/g, "\\'")}')">
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h4 style="margin: 0; font-size: 1rem;">Roles (${program.roles?.length || 0})</h4>
+              <button class="btn btn-primary btn-sm" onclick="addRole(${program.id}, '${program.name.replace(/'/g, "\\'")}')">
+                ➕ Add Role
+              </button>
+            </div>
+            ${program.roles && program.roles.length > 0 ? `
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Role Name</th>
+                    <th>Description</th>
+                    <th style="width: 150px; text-align: center;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${program.roles.map(role => `
+                    <tr>
+                      <td><strong>${role.role_name}</strong></td>
+                      <td>${role.description || '-'}</td>
+                      <td style="text-align: center;">
+                        <button class="btn btn-secondary btn-sm" onclick="editRole(${program.id}, ${role.id}, '${role.role_name.replace(/'/g, "\\'")}', '${(role.description || '').replace(/'/g, "\\'")}')">
+                          ✏️
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteRole(${program.id}, ${role.id}, '${role.role_name.replace(/'/g, "\\'")}')">
+                          🗑️
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            ` : '<p style="text-align: center; color: var(--gray-500); padding: 16px 0;">No roles defined yet</p>'}
+          </div>
+        </div>
+      `).join('');
+    } else {
+      showError('Unable to load programs');
+    }
+  } catch (error) {
+    console.error('Error loading programs:', error);
+    showError('An error occurred while loading programs');
+  }
+}
+
+// Add/Edit Program
+document.getElementById('add-program-btn-mgmt')?.addEventListener('click', () => {
+  document.getElementById('program-modal-title').textContent = 'Add New Program';
+  document.getElementById('program-form').reset();
+  document.getElementById('program-id').value = '';
+  document.getElementById('program-modal').classList.add('active');
+});
+
+window.editProgram = function(id, name, description) {
+  document.getElementById('program-modal-title').textContent = 'Edit Program';
+  document.getElementById('program-id').value = id;
+  document.getElementById('program-name').value = name;
+  document.getElementById('program-description').value = description || '';
+  document.getElementById('program-modal').classList.add('active');
+};
+
+// Submit program form
+document.getElementById('program-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const programId = document.getElementById('program-id').value;
+  const formData = {
+    name: document.getElementById('program-name').value,
+    description: document.getElementById('program-description').value,
+    [programId ? 'updatedBy' : 'createdBy']: currentUser.username
+  };
+
+  try {
+    const url = programId
+      ? `${API_URL}/api/programs/${programId}`
+      : `${API_URL}/api/programs`;
+
+    const response = await fetch(url, {
+      method: programId ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess(programId ? '✅ Program updated successfully' : '✅ Program created successfully');
+      document.getElementById('program-modal').classList.remove('active');
+      loadProgramsManagement();
+      loadProgramsList(); // Reload for create request form
+    } else {
+      showError(data.message || 'Unable to save program');
+    }
+  } catch (error) {
+    console.error('Error saving program:', error);
+    showError('An error occurred while saving program');
+  }
+});
+
+// Delete program
+window.deleteProgram = async function(programId, programName) {
+  if (!confirm(`Delete program "${programName}"?\n\nThis will also delete all roles in this program. Are you sure?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/programs/${programId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deletedBy: currentUser.username })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Program deleted successfully');
+      loadProgramsManagement();
+      loadProgramsList();
+    } else {
+      showError(data.message || 'Unable to delete program');
+    }
+  } catch (error) {
+    console.error('Error deleting program:', error);
+    showError('An error occurred while deleting program');
+  }
+};
+
+// Add/Edit Role
+window.addRole = function(programId, programName) {
+  document.getElementById('role-modal-title').textContent = `Add Role to ${programName}`;
+  document.getElementById('role-form').reset();
+  document.getElementById('role-id').value = '';
+  document.getElementById('role-program-id').value = programId;
+  document.getElementById('role-modal').classList.add('active');
+};
+
+window.editRole = function(programId, roleId, roleName, description) {
+  document.getElementById('role-modal-title').textContent = 'Edit Role';
+  document.getElementById('role-id').value = roleId;
+  document.getElementById('role-program-id').value = programId;
+  document.getElementById('role-name').value = roleName;
+  document.getElementById('role-description').value = description || '';
+  document.getElementById('role-modal').classList.add('active');
+};
+
+// Submit role form
+document.getElementById('role-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const roleId = document.getElementById('role-id').value;
+  const programId = document.getElementById('role-program-id').value;
+  const formData = {
+    role_name: document.getElementById('role-name').value,
+    description: document.getElementById('role-description').value,
+    [roleId ? 'updatedBy' : 'createdBy']: currentUser.username
+  };
+
+  try {
+    const url = roleId
+      ? `${API_URL}/api/programs/${programId}/roles/${roleId}`
+      : `${API_URL}/api/programs/${programId}/roles`;
+
+    const response = await fetch(url, {
+      method: roleId ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess(roleId ? '✅ Role updated successfully' : '✅ Role created successfully');
+      document.getElementById('role-modal').classList.remove('active');
+      loadProgramsManagement();
+      loadProgramsList();
+    } else {
+      showError(data.message || 'Unable to save role');
+    }
+  } catch (error) {
+    console.error('Error saving role:', error);
+    showError('An error occurred while saving role');
+  }
+});
+
+// Delete role
+window.deleteRole = async function(programId, roleId, roleName) {
+  if (!confirm(`Delete role "${roleName}"? Are you sure?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/programs/${programId}/roles/${roleId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deletedBy: currentUser.username })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Role deleted successfully');
+      loadProgramsManagement();
+      loadProgramsList();
+    } else {
+      showError(data.message || 'Unable to delete role');
+    }
+  } catch (error) {
+    console.error('Error deleting role:', error);
+    showError('An error occurred while deleting role');
+  }
+};
+
+// Close program modal
+document.getElementById('program-modal-close')?.addEventListener('click', () => {
+  document.getElementById('program-modal').classList.remove('active');
+});
+
+document.getElementById('program-cancel-btn')?.addEventListener('click', () => {
+  document.getElementById('program-modal').classList.remove('active');
+});
+
+// Close role modal
+document.getElementById('role-modal-close')?.addEventListener('click', () => {
+  document.getElementById('role-modal').classList.remove('active');
+});
+
+document.getElementById('role-cancel-btn')?.addEventListener('click', () => {
+  document.getElementById('role-modal').classList.remove('active');
 });
 
 // Filter buttons
