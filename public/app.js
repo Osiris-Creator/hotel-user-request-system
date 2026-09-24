@@ -1,7 +1,5 @@
 // Configuration
-const API_URL = window.location.hostname === 'localhost'
-  ? 'http://localhost:8787'
-  : 'https://hotel-user-request-system.avanivacationclubsamui1.workers.dev';
+const API_URL = 'https://hotel-user-request-system.avanivacationclubsamui1.workers.dev';
 
 let currentUser = null;
 let programs = [];
@@ -53,12 +51,12 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
       errorDiv.style.display = 'none';
       showApp();
     } else {
-      errorDiv.textContent = data.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+      errorDiv.textContent = data.message || 'Invalid username or password';
       errorDiv.style.display = 'block';
     }
   } catch (error) {
     console.error('Login error:', error);
-    errorDiv.textContent = 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ';
+    errorDiv.textContent = 'An error occurred during login';
     errorDiv.style.display = 'block';
   }
 });
@@ -95,7 +93,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
     // Check permission
     if (currentUser.role === 'user' && btn.classList.contains('admin-only')) {
-      showError('คุณไม่มีสิทธิ์เข้าถึงหน้านี้');
+      showError('You do not have permission to access this page');
       return;
     }
 
@@ -138,11 +136,11 @@ async function loadPrograms() {
       programs = data.data;
       addProgramAccess();
     } else {
-      showError('ไม่สามารถโหลดข้อมูลโปรแกรมได้');
+      showError('Unable to load programs');
     }
   } catch (error) {
     console.error('Error loading programs:', error);
-    showError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+    showError('An error occurred while loading data');
   }
 }
 
@@ -156,16 +154,16 @@ function addProgramAccess() {
   div.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: end; padding: 16px; background: var(--gray-50); border-radius: 10px; margin-bottom: 12px;';
   div.innerHTML = `
     <div class="form-group" style="margin-bottom: 0;">
-      <label>โปรแกรม</label>
+      <label>Program</label>
       <select class="program-select" data-index="${index}" required>
-        <option value="">-- เลือกโปรแกรม --</option>
+        <option value="">-- Select Program --</option>
         ${programs.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
       </select>
     </div>
     <div class="form-group" style="margin-bottom: 0;">
       <label>Role</label>
       <select class="role-select" data-index="${index}" required disabled>
-        <option value="">-- เลือก Role --</option>
+        <option value="">-- Select Role --</option>
       </select>
     </div>
     <div class="form-group" style="margin-bottom: 0;">
@@ -184,7 +182,7 @@ function addProgramAccess() {
       await loadRoles(programId, roleSelect);
     } else {
       roleSelect.disabled = true;
-      roleSelect.innerHTML = '<option value="">-- เลือก Role --</option>';
+      roleSelect.innerHTML = '<option value="">-- Select Role --</option>';
     }
   });
 
@@ -201,7 +199,7 @@ async function loadRoles(programId, selectElement) {
   try {
     const program = programs.find(p => p.id == programId);
     if (program && program.roles) {
-      selectElement.innerHTML = '<option value="">-- เลือก Role --</option>' +
+      selectElement.innerHTML = '<option value="">-- Select Role --</option>' +
         program.roles.map(r => `<option value="${r.id}">${r.role_name}</option>`).join('');
     }
   } catch (error) {
@@ -234,7 +232,7 @@ document.getElementById('create-request-form').addEventListener('submit', async 
   });
 
   if (programAccess.length === 0) {
-    showError('กรุณาเลือกโปรแกรมและ Role อย่างน้อย 1 รายการ');
+    showError('Please select at least one program and role');
     return;
   }
 
@@ -265,16 +263,16 @@ document.getElementById('create-request-form').addEventListener('submit', async 
     const data = await response.json();
 
     if (data.success) {
-      showSuccess(`✅ สร้างคำขอสำเร็จ! เลขที่: ${data.data.requestNumber}`);
+      showSuccess(`✅ Request created successfully! เลขที่: ${data.data.requestNumber}`);
       e.target.reset();
       document.getElementById('program-access-list').innerHTML = '';
       addProgramAccess();
     } else {
-      showError('ไม่สามารถสร้างคำขอได้: ' + data.message);
+      showError('Unable to create request: ' + data.message);
     }
   } catch (error) {
     console.error('Error creating request:', error);
-    showError('เกิดข้อผิดพลาดในการสร้างคำขอ');
+    showError('An error occurredในการสร้างคำขอ');
   }
 });
 
@@ -284,7 +282,7 @@ async function loadRequests() {
   const search = document.getElementById('filter-search').value;
 
   const container = document.getElementById('requests-list');
-  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>กำลังโหลด...</p></div>';
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
 
   try {
     let url = `${API_URL}/api/requests?limit=50`;
@@ -297,11 +295,11 @@ async function loadRequests() {
     if (data.success) {
       displayRequests(data.data);
     } else {
-      container.innerHTML = '<div class="alert alert-error">ไม่สามารถโหลดข้อมูลได้</div>';
+      container.innerHTML = '<div class="alert alert-error">Unable to load data</div>';
     }
   } catch (error) {
     console.error('Error loading requests:', error);
-    container.innerHTML = '<div class="alert alert-error">เกิดข้อผิดพลาดในการโหลดข้อมูล</div>';
+    container.innerHTML = '<div class="alert alert-error">An error occurredในการโหลดข้อมูล</div>';
   }
 }
 
@@ -310,7 +308,7 @@ function displayRequests(requests) {
   const container = document.getElementById('requests-list');
 
   if (requests.length === 0) {
-    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">ไม่พบข้อมูล</p>';
+    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">No data found</p>';
     return;
   }
 
@@ -361,7 +359,7 @@ async function showRequestDetail(requestId) {
   const modal = document.getElementById('detail-modal');
   const modalBody = document.getElementById('modal-body');
 
-  modalBody.innerHTML = '<div class="loading"><div class="spinner"></div><p>กำลังโหลด...</p></div>';
+  modalBody.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
   modal.classList.add('active');
 
   try {
@@ -430,11 +428,11 @@ async function showRequestDetail(requestId) {
         </div>
       `;
     } else {
-      modalBody.innerHTML = '<div class="alert alert-error">ไม่สามารถโหลดข้อมูลได้</div>';
+      modalBody.innerHTML = '<div class="alert alert-error">Unable to load data</div>';
     }
   } catch (error) {
     console.error('Error loading request detail:', error);
-    modalBody.innerHTML = '<div class="alert alert-error">เกิดข้อผิดพลาด</div>';
+    modalBody.innerHTML = '<div class="alert alert-error">An error occurred</div>';
   }
 }
 
@@ -456,15 +454,15 @@ window.updateStatus = async function(requestId, status) {
     const data = await response.json();
 
     if (data.success) {
-      showSuccess('✅ อัปเดตสถานะสำเร็จ');
+      showSuccess('✅ Status updated successfully');
       document.getElementById('detail-modal').classList.remove('active');
       loadRequests();
     } else {
-      showError('ไม่สามารถอัปเดตสถานะได้');
+      showError('Unable to update status');
     }
   } catch (error) {
     console.error('Error updating status:', error);
-    showError('เกิดข้อผิดพลาด');
+    showError('An error occurred');
   }
 };
 
@@ -474,7 +472,7 @@ document.getElementById('generate-report-btn')?.addEventListener('click', async 
   const toDate = document.getElementById('report-to-date').value;
 
   if (!fromDate || !toDate) {
-    showError('กรุณาเลือกช่วงวันที่');
+    showError('Please select date range');
     return;
   }
 
@@ -486,11 +484,11 @@ document.getElementById('generate-report-btn')?.addEventListener('click', async 
     if (data.success) {
       displayReport(data.data, fromDate, toDate);
     } else {
-      showError('ไม่สามารถสร้างรีพอร์ตได้');
+      showError('Unable to generate report');
     }
   } catch (error) {
     console.error('Error generating report:', error);
-    showError('เกิดข้อผิดพลาด');
+    showError('An error occurred');
   }
 });
 
@@ -568,7 +566,7 @@ document.getElementById('export-excel-btn')?.addEventListener('click', async () 
   const toDate = document.getElementById('report-to-date').value;
 
   if (!fromDate || !toDate) {
-    showError('กรุณาเลือกช่วงวันที่ก่อน');
+    showError('Please select date rangeก่อน');
     return;
   }
 
@@ -582,7 +580,7 @@ document.getElementById('export-excel-btn')?.addEventListener('click', async () 
     }
   } catch (error) {
     console.error('Error exporting:', error);
-    showError('เกิดข้อผิดพลาดในการ Export');
+    showError('An error occurredในการ Export');
   }
 });
 
@@ -610,7 +608,7 @@ function exportToCSV(requests, fromDate, toDate) {
   link.download = `request-report-${fromDate}-to-${toDate}.csv`;
   link.click();
 
-  showSuccess('✅ Export สำเร็จ');
+  showSuccess('✅ Export successful');
 }
 
 // Load audit logs
@@ -619,7 +617,7 @@ async function loadAuditLogs() {
   const days = parseInt(document.getElementById('audit-days').value);
 
   const container = document.getElementById('audit-list');
-  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>กำลังโหลด...</p></div>';
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
 
   try {
     const toDate = new Date();
@@ -635,11 +633,11 @@ async function loadAuditLogs() {
     if (data.success) {
       displayAuditLogs(data.data);
     } else {
-      container.innerHTML = '<div class="alert alert-error">ไม่สามารถโหลดข้อมูลได้</div>';
+      container.innerHTML = '<div class="alert alert-error">Unable to load data</div>';
     }
   } catch (error) {
     console.error('Error loading audit logs:', error);
-    container.innerHTML = '<div class="alert alert-error">เกิดข้อผิดพลาด</div>';
+    container.innerHTML = '<div class="alert alert-error">An error occurred</div>';
   }
 }
 
@@ -647,7 +645,7 @@ function displayAuditLogs(logs) {
   const container = document.getElementById('audit-list');
 
   if (logs.length === 0) {
-    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">ไม่พบข้อมูล</p>';
+    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">No data found</p>';
     return;
   }
 
@@ -673,7 +671,7 @@ function displayAuditLogs(logs) {
 // Load system users
 async function loadSystemUsers() {
   const container = document.getElementById('users-list');
-  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>กำลังโหลด...</p></div>';
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
 
   try {
     const response = await fetch(`${API_URL}/api/system-users`);
@@ -682,11 +680,11 @@ async function loadSystemUsers() {
     if (data.success) {
       displaySystemUsers(data.data);
     } else {
-      container.innerHTML = '<div class="alert alert-error">ไม่สามารถโหลดข้อมูลได้</div>';
+      container.innerHTML = '<div class="alert alert-error">Unable to load data</div>';
     }
   } catch (error) {
     console.error('Error loading users:', error);
-    container.innerHTML = '<div class="alert alert-error">เกิดข้อผิดพลาด</div>';
+    container.innerHTML = '<div class="alert alert-error">An error occurred</div>';
   }
 }
 
@@ -694,7 +692,7 @@ function displaySystemUsers(users) {
   const container = document.getElementById('users-list');
 
   if (users.length === 0) {
-    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">ไม่พบข้อมูล</p>';
+    container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 40px;">No data found</p>';
     return;
   }
 
@@ -833,16 +831,16 @@ document.getElementById('user-form')?.addEventListener('submit', async (e) => {
     const data = await response.json();
 
     if (data.success) {
-      showSuccess(userId ? '✅ แก้ไขผู้ใช้สำเร็จ' : '✅ เพิ่มผู้ใช้สำเร็จ');
+      showSuccess(userId ? '✅ User updated successfully' : '✅ User created successfully');
       document.getElementById('user-modal').classList.remove('active');
       document.getElementById('user-username').disabled = false;
       loadSystemUsers();
     } else {
-      showError(data.message || 'ไม่สามารถบันทึกข้อมูลได้');
+      showError(data.message || 'Unable to save data');
     }
   } catch (error) {
     console.error('Error saving user:', error);
-    showError('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+    showError('An error occurredในการบันทึกข้อมูล');
   }
 });
 
@@ -853,7 +851,7 @@ window.editUser = function(userId) {
 
 // Delete user
 window.deleteUser = async function(userId, username) {
-  if (!confirm(`คุณต้องการลบผู้ใช้ "${username}" ใช่หรือไม่?`)) {
+  if (!confirm(`Do you want to delete user "${username}" Are you sure?`)) {
     return;
   }
 
@@ -867,14 +865,14 @@ window.deleteUser = async function(userId, username) {
     const data = await response.json();
 
     if (data.success) {
-      showSuccess('✅ ลบผู้ใช้สำเร็จ');
+      showSuccess('✅ User deleted successfully');
       loadSystemUsers();
     } else {
-      showError(data.message || 'ไม่สามารถลบผู้ใช้ได้');
+      showError(data.message || 'Unable to delete user');
     }
   } catch (error) {
     console.error('Error deleting user:', error);
-    showError('เกิดข้อผิดพลาดในการลบผู้ใช้');
+    showError('An error occurredในการลบผู้ใช้');
   }
 };
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,31 +11,32 @@
   <div id="login-page" class="login-container">
     <div class="login-card">
       <div class="login-header">
-        <h1>🏨 ระบบขอเข้าใช้งานโปรแกรม</h1>
-        <p>Hotel User Request Management System</p>
+        <img src="logo.svg" alt="AVANI+ Vacation Club Samui" style="max-width: 280px; height: auto; margin: 0 auto 24px; display: block;">
+        <h1 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 8px;">User Access Request System</h1>
+        <p style="font-size: 0.9rem; color: var(--gray-600);">Hotel User Request Management System</p>
       </div>
       <div class="login-body">
         <div class="login-tabs">
-          <button class="login-tab active" data-role="user">👤 พนักงาน</button>
-          <button class="login-tab" data-role="admin">🔐 ผู้ดูแลระบบ</button>
+          <button class="login-tab active" data-role="user">👤 Employee</button>
+          <button class="login-tab" data-role="admin">🔐 Administrator</button>
         </div>
 
         <form id="login-form">
           <div class="form-group">
-            <label for="login-username">ชื่อผู้ใช้</label>
-            <input type="text" id="login-username" name="username" required placeholder="กรอกชื่อผู้ใช้">
+            <label for="login-username">Username</label>
+            <input type="text" id="login-username" name="username" required placeholder="Enter username">
           </div>
           <div class="form-group">
-            <label for="login-password">รหัสผ่าน</label>
-            <input type="password" id="login-password" name="password" required placeholder="กรอกรหัสผ่าน">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" name="password" required placeholder="Enter password">
           </div>
 
           <div id="login-error" style="display: none;" class="alert alert-error">
-            ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง
+            Invalid username or password
           </div>
 
           <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 20px;">
-            🔓 เข้าสู่ระบบ
+            🔓 Sign In
           </button>
         </form>
       </div>
@@ -59,7 +60,7 @@
             </div>
           </div>
           <button class="btn btn-secondary" id="logout-btn" style="padding: 10px 20px;">
-            🚪 ออกจากระบบ
+            🚪 Sign Out
           </button>
         </div>
       </div>
@@ -70,16 +71,16 @@
       <!-- Navigation Tabs -->
       <nav class="tabs" id="main-tabs">
         <button class="tab-btn active" data-tab="create">
-          ➕ สร้างคำขอใหม่
+          ➕ New Request
         </button>
         <button class="tab-btn admin-only" data-tab="list">
-          📋 รายการคำขอ
+          📋 Requests
         </button>
         <button class="tab-btn admin-only" data-tab="reports">
-          📊 รีพอร์ต
+          📊 Reports
         </button>
         <button class="tab-btn admin-only" data-tab="users">
-          👥 จัดการผู้ใช้
+          👥 User Management
         </button>
         <button class="tab-btn admin-only" data-tab="audit">
           🔍 Audit Log
@@ -90,79 +91,79 @@
       <div id="create-tab" class="tab-content active">
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title">➕ สร้างคำขอเข้าใช้งานใหม่</h2>
+            <h2 class="card-title">➕ Create New Access Request</h2>
           </div>
 
           <form id="create-request-form">
             <div class="form-section">
-              <h3 class="form-section-title">👤 ข้อมูลพนักงาน</h3>
+              <h3 class="form-section-title">👤 Employee Information</h3>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="employee_id">รหัสพนักงาน *</label>
+                  <label for="employee_id">Employee ID *</label>
                   <input type="text" id="employee_id" name="employee_id" required>
                 </div>
                 <div class="form-group">
-                  <label for="email">อีเมล *</label>
+                  <label for="email">Email *</label>
                   <input type="email" id="email" name="email" required>
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="first_name">ชื่อ *</label>
+                  <label for="first_name">First Name *</label>
                   <input type="text" id="first_name" name="first_name" required>
                 </div>
                 <div class="form-group">
-                  <label for="last_name">นามสกุล *</label>
+                  <label for="last_name">Last Name *</label>
                   <input type="text" id="last_name" name="last_name" required>
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="department">แผนก</label>
+                  <label for="department">Department</label>
                   <input type="text" id="department" name="department">
                 </div>
                 <div class="form-group">
-                  <label for="position">ตำแหน่ง</label>
+                  <label for="position">Position</label>
                   <input type="text" id="position" name="position">
                 </div>
               </div>
             </div>
 
             <div class="form-section">
-              <h3 class="form-section-title">📝 ข้อมูลผู้ขอ</h3>
+              <h3 class="form-section-title">📝 Requester Information</h3>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="requester_name">ชื่อผู้ขอ *</label>
+                  <label for="requester_name">Requester Name *</label>
                   <input type="text" id="requester_name" name="requester_name" required>
                 </div>
                 <div class="form-group">
-                  <label for="requester_email">อีเมลผู้ขอ *</label>
+                  <label for="requester_email">Requester Email *</label>
                   <input type="email" id="requester_email" name="requester_email" required>
                 </div>
               </div>
             </div>
 
             <div class="form-section">
-              <h3 class="form-section-title">💻 โปรแกรมและสิทธิ์การใช้งาน</h3>
+              <h3 class="form-section-title">💻 Program Access & Roles</h3>
               <div id="program-access-list"></div>
               <button type="button" id="add-program-btn" class="btn btn-secondary">
-                ➕ เพิ่มโปรแกรม
+                ➕ Add Program
               </button>
             </div>
 
             <div class="form-section">
-              <h3 class="form-section-title">📌 หมายเหตุ</h3>
+              <h3 class="form-section-title">📌 Notes</h3>
               <div class="form-group">
-                <textarea id="notes" name="notes" rows="3" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)"></textarea>
+                <textarea id="notes" name="notes" rows="3" placeholder="Additional notes (optional)"></textarea>
               </div>
             </div>
 
             <div style="display: flex; gap: 12px; margin-top: 24px;">
               <button type="submit" class="btn btn-primary">
-                ✅ สร้างคำขอ
+                ✅ Create Request
               </button>
               <button type="reset" class="btn btn-secondary">
-                🔄 ล้างฟอร์ม
+                🔄 Reset Form
               </button>
             </div>
           </form>
@@ -173,28 +174,28 @@
       <div id="list-tab" class="tab-content">
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title">📋 รายการคำขอทั้งหมด</h2>
+            <h2 class="card-title">📋 All Requests</h2>
           </div>
 
           <div class="filters">
             <div class="form-row">
               <div class="form-group">
-                <label for="filter-status">สถานะ</label>
+                <label for="filter-status">Status</label>
                 <select id="filter-status">
-                  <option value="">ทั้งหมด</option>
-                  <option value="pending">รอพิจารณา</option>
-                  <option value="approved">อนุมัติแล้ว</option>
-                  <option value="rejected">ไม่อนุมัติ</option>
-                  <option value="completed">เสร็จสิ้น</option>
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="completed">Completed</option>
                 </select>
               </div>
               <div class="form-group">
-                <label for="filter-search">ค้นหา</label>
-                <input type="text" id="filter-search" placeholder="เลขที่คำขอ, ชื่อ, รหัสพนักงาน">
+                <label for="filter-search">Search</label>
+                <input type="text" id="filter-search" placeholder="Request number, name, employee ID">
               </div>
               <div class="form-group">
                 <label>&nbsp;</label>
-                <button id="filter-btn" class="btn btn-primary">🔍 ค้นหา</button>
+                <button id="filter-btn" class="btn btn-primary">🔍 Search</button>
               </div>
             </div>
           </div>
@@ -202,7 +203,7 @@
           <div id="requests-list" class="requests-grid">
             <div class="loading">
               <div class="spinner"></div>
-              <p>กำลังโหลด...</p>
+              <p>Loading...</p>
             </div>
           </div>
         </div>
@@ -212,22 +213,22 @@
       <div id="reports-tab" class="tab-content">
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title">📊 รีพอร์ตคำขอ</h2>
+            <h2 class="card-title">📊 Request Reports</h2>
           </div>
 
           <div class="filters">
             <div class="form-row">
               <div class="form-group">
-                <label for="report-from-date">จากวันที่</label>
+                <label for="report-from-date">From Date</label>
                 <input type="date" id="report-from-date">
               </div>
               <div class="form-group">
-                <label for="report-to-date">ถึงวันที่</label>
+                <label for="report-to-date">To Date</label>
                 <input type="date" id="report-to-date">
               </div>
               <div class="form-group">
                 <label>&nbsp;</label>
-                <button id="generate-report-btn" class="btn btn-primary">📊 สร้างรีพอร์ต</button>
+                <button id="generate-report-btn" class="btn btn-primary">📊 Generate Report</button>
               </div>
               <div class="form-group">
                 <label>&nbsp;</label>
@@ -245,14 +246,14 @@
       <div id="users-tab" class="tab-content">
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title">👥 จัดการผู้ใช้งานระบบ</h2>
-            <button id="add-user-btn" class="btn btn-primary">➕ เพิ่มผู้ใช้</button>
+            <h2 class="card-title">👥 User Management</h2>
+            <button id="add-user-btn" class="btn btn-primary">➕ Add User</button>
           </div>
 
           <div id="users-list" style="margin-top: 24px;">
             <div class="loading">
               <div class="spinner"></div>
-              <p>กำลังโหลด...</p>
+              <p>Loading...</p>
             </div>
           </div>
         </div>
@@ -270,7 +271,7 @@
               <div class="form-group">
                 <label for="audit-action">Action</label>
                 <select id="audit-action">
-                  <option value="">ทั้งหมด</option>
+                  <option value="">All</option>
                   <option value="CREATE">CREATE</option>
                   <option value="UPDATE_STATUS">UPDATE_STATUS</option>
                   <option value="LOGIN">LOGIN</option>
@@ -280,16 +281,16 @@
                 </select>
               </div>
               <div class="form-group">
-                <label for="audit-days">ช่วงเวลา</label>
+                <label for="audit-days">Time Period</label>
                 <select id="audit-days">
-                  <option value="7">7 วันที่ผ่านมา</option>
-                  <option value="30">30 วันที่ผ่านมา</option>
-                  <option value="90">90 วันที่ผ่านมา</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
                 </select>
               </div>
               <div class="form-group">
                 <label>&nbsp;</label>
-                <button id="audit-filter-btn" class="btn btn-primary">🔍 ค้นหา</button>
+                <button id="audit-filter-btn" class="btn btn-primary">🔍 Search</button>
               </div>
             </div>
           </div>
@@ -297,7 +298,7 @@
           <div id="audit-list" style="margin-top: 24px;">
             <div class="loading">
               <div class="spinner"></div>
-              <p>กำลังโหลด...</p>
+              <p>Loading...</p>
             </div>
           </div>
         </div>
@@ -320,7 +321,7 @@
   <div id="user-modal" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 id="user-modal-title">เพิ่มผู้ใช้ใหม่</h2>
+        <h2 id="user-modal-title">Add New User</h2>
         <button class="modal-close" id="user-modal-close">&times;</button>
       </div>
       <div class="modal-body">
@@ -328,47 +329,47 @@
           <input type="hidden" id="user-id">
 
           <div class="form-group">
-            <label for="user-username">ชื่อผู้ใช้ (Username) *</label>
+            <label for="user-username">Username *</label>
             <input type="text" id="user-username" name="username" required>
           </div>
 
           <div class="form-group">
-            <label for="user-password">รหัสผ่าน *</label>
+            <label for="user-password">Password *</label>
             <input type="password" id="user-password" name="password" required>
-            <small style="color: var(--gray-500);">ใส่รหัสผ่านใหม่หากต้องการเปลี่ยน</small>
+            <small style="color: var(--gray-500);">Enter new password to change</small>
           </div>
 
           <div class="form-group">
-            <label for="user-fullname">ชื่อ-นามสกุล *</label>
+            <label for="user-fullname">Full Name *</label>
             <input type="text" id="user-fullname" name="full_name" required>
           </div>
 
           <div class="form-group">
-            <label for="user-email">อีเมล</label>
+            <label for="user-email">Email</label>
             <input type="email" id="user-email" name="email">
           </div>
 
           <div class="form-group">
-            <label for="user-role">บทบาท *</label>
+            <label for="user-role">Role *</label>
             <select id="user-role" name="role" required>
-              <option value="user">👤 User - พนักงาน</option>
-              <option value="admin">🔐 Admin - ผู้ดูแลระบบ</option>
+              <option value="user">👤 User - Employee</option>
+              <option value="admin">🔐 Admin - Administrator</option>
             </select>
           </div>
 
           <div class="form-group" id="user-active-group" style="display: none;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
               <input type="checkbox" id="user-active" name="is_active" checked style="width: auto;">
-              <span>เปิดใช้งาน</span>
+              <span>Active</span>
             </label>
           </div>
 
           <div style="display: flex; gap: 12px; margin-top: 24px;">
             <button type="submit" class="btn btn-primary">
-              ✅ บันทึก
+              ✅ Save
             </button>
             <button type="button" class="btn btn-secondary" id="user-cancel-btn">
-              ❌ ยกเลิก
+              ❌ Cancel
             </button>
           </div>
         </form>

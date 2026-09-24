@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600">
+  <defs>
+    <style>
+      .logo-text { font-family: Arial, sans-serif; fill: #1a2332; }
+      .brand { font-size: 120px; font-weight: bold; letter-spacing: 8px; }
+      .subtitle { font-size: 56px; font-weight: 400; letter-spacing: 2px; }
+    </style>
+  </defs>
+  <text x="600" y="280" class="logo-text brand" text-anchor="middle">AVANI+</text>
+  <text x="600" y="370" class="logo-text subtitle" text-anchor="middle">Vacation Club Samui</text>
+</svg>
