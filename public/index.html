@@ -85,6 +85,9 @@
         <button class="tab-btn admin-only" data-tab="programs">
           💻 Programs & Roles
         </button>
+        <button class="tab-btn admin-only" data-tab="approvers">
+          ✅ Approval Settings
+        </button>
         <button class="tab-btn admin-only" data-tab="audit">
           🔍 Audit Log
         </button>
@@ -106,8 +109,8 @@
                   <input type="text" id="employee_id" name="employee_id" required>
                 </div>
                 <div class="form-group">
-                  <label for="email">Email *</label>
-                  <input type="email" id="email" name="email" required>
+                  <label for="email">Email</label>
+                  <input type="email" id="email" name="email">
                 </div>
               </div>
               <div class="form-row">
@@ -274,6 +277,28 @@
             <div class="loading">
               <div class="spinner"></div>
               <p>Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Approval Settings Tab (Admin Only) -->
+      <div id="approvers-tab" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">✅ Approval Workflow Settings</h2>
+          </div>
+
+          <div style="margin-top: 24px;">
+            <p style="color: var(--gray-600); margin-bottom: 24px;">
+              Configure the approval workflow. Requests will be routed to Approver 1, then Approver 2, and finally a notification will be sent to the Final Email.
+            </p>
+
+            <div id="approvers-list">
+              <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+              </div>
             </div>
           </div>
         </div>

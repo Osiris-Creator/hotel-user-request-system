@@ -91,6 +91,32 @@ CREATE TABLE IF NOT EXISTS system_users (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Create approval_settings table (Approver 1, Approver 2, Final notification)
+CREATE TABLE IF NOT EXISTS approval_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  approver_level INTEGER NOT NULL,
+  approver_name TEXT NOT NULL,
+  approver_email TEXT NOT NULL,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(approver_level)
+);
+
+-- Create approval_history table (Track approval workflow)
+CREATE TABLE IF NOT EXISTS approval_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id INTEGER NOT NULL,
+  approver_level INTEGER NOT NULL,
+  approver_name TEXT NOT NULL,
+  approver_email TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+  comments TEXT,
+  approved_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (request_id) REFERENCES user_requests(id) ON DELETE CASCADE
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_user_requests_status ON user_requests(status);
 CREATE INDEX IF NOT EXISTS idx_user_requests_date ON user_requests(request_date);
@@ -99,3 +125,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_date ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_system_users_username ON system_users(username);
 CREATE INDEX IF NOT EXISTS idx_system_users_role ON system_users(role);
+CREATE INDEX IF NOT EXISTS idx_approval_history_request ON approval_history(request_id);
+CREATE INDEX IF NOT EXISTS idx_approval_history_level ON approval_history(approver_level);
+CREATE INDEX IF NOT EXISTS idx_approval_settings_level ON approval_settings(approver_level);

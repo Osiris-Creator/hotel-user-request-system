@@ -491,6 +491,165 @@ app.delete('/api/programs/:programId/roles/:roleId', async (c) => {
 });
 
 // ============================================
+// APPROVAL WORKFLOW MANAGEMENT
+// ============================================
+
+// Get approval settings
+app.get('/api/approval-settings', async (c) => {
+  try {
+    const settings = await c.env.DB.prepare(
+      'SELECT * FROM approval_settings WHERE is_active = 1 ORDER BY approver_level'
+    ).all();
+
+    return c.json({ success: true, data: settings.results });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to fetch approval settings', error: error.message }, 500);
+  }
+});
+
+// Update approval settings
+app.patch('/api/approval-settings/:level', async (c) => {
+  try {
+    const level = c.req.param('level');
+    const { approver_name, approver_email, updatedBy } = await c.req.json();
+
+    await c.env.DB.prepare(
+      'UPDATE approval_settings SET approver_name = ?, approver_email = ? WHERE approver_level = ?'
+    ).bind(approver_name, approver_email, level).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('UPDATE_APPROVER', updatedBy, `Updated approver level ${level}: ${approver_name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Approval settings updated successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to update approval settings', error: error.message }, 500);
+  }
+});
+
+// Get approval history for a request
+app.get('/api/requests/:id/approvals', async (c) => {
+  try {
+    const requestId = c.req.param('id');
+    const history = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? ORDER BY approver_level'
+    ).bind(requestId).all();
+
+    return c.json({ success: true, data: history.results });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to fetch approval history', error: error.message }, 500);
+  }
+});
+
+// Approve request (by approver level)
+app.post('/api/requests/:id/approve', async (c) => {
+  try {
+    const requestId = c.req.param('id');
+    const { approver_level, comments, approvedBy } = await c.req.json();
+
+    // Get request details
+    const request = await c.env.DB.prepare(
+      'SELECT * FROM user_requests WHERE id = ?'
+    ).bind(requestId).first();
+
+    if (!request) {
+      return c.json({ success: false, message: 'Request not found' }, 404);
+    }
+
+    // Get approver settings
+    const approver = await c.env.DB.prepare(
+      'SELECT * FROM approval_settings WHERE approver_level = ?'
+    ).bind(approver_level).first();
+
+    if (!approver) {
+      return c.json({ success: false, message: 'Approver not found' }, 404);
+    }
+
+    // Check if already approved at this level
+    const existing = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? AND approver_level = ?'
+    ).bind(requestId, approver_level).first();
+
+    if (existing) {
+      return c.json({ success: false, message: 'Already approved at this level' }, 400);
+    }
+
+    // Add approval record
+    await c.env.DB.prepare(
+      'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status, comments, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(requestId, approver_level, approver.approver_name, approver.approver_email, 'approved', comments || '', new Date().toISOString()).run();
+
+    // Check if all approvers have approved (level 1 and 2)
+    const approvalCount = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM approval_history WHERE request_id = ? AND status = ? AND approver_level IN (1, 2)'
+    ).bind(requestId, 'approved').first();
+
+    let newStatus = request.status;
+    if (approvalCount.count >= 2) {
+      // All approvers approved
+      newStatus = 'approved';
+      await c.env.DB.prepare(
+        'UPDATE user_requests SET status = ?, approved_by = ?, approved_date = ? WHERE id = ?'
+      ).bind(newStatus, approvedBy, new Date().toISOString(), requestId).run();
+    }
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
+    ).bind('APPROVE_REQUEST', requestId, approvedBy, `Approved by ${approver.approver_name} (Level ${approver_level})`, clientIP).run();
+
+    return c.json({
+      success: true,
+      message: 'Request approved successfully',
+      newStatus: newStatus,
+      needsMoreApproval: newStatus !== 'approved'
+    });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to approve request', error: error.message }, 500);
+  }
+});
+
+// Reject request (by approver level)
+app.post('/api/requests/:id/reject', async (c) => {
+  try {
+    const requestId = c.req.param('id');
+    const { approver_level, comments, rejectedBy } = await c.req.json();
+
+    // Get approver settings
+    const approver = await c.env.DB.prepare(
+      'SELECT * FROM approval_settings WHERE approver_level = ?'
+    ).bind(approver_level).first();
+
+    if (!approver) {
+      return c.json({ success: false, message: 'Approver not found' }, 404);
+    }
+
+    // Add rejection record
+    await c.env.DB.prepare(
+      'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status, comments, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(requestId, approver_level, approver.approver_name, approver.approver_email, 'rejected', comments || '', new Date().toISOString()).run();
+
+    // Update request status
+    await c.env.DB.prepare(
+      'UPDATE user_requests SET status = ? WHERE id = ?'
+    ).bind('rejected', requestId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
+    ).bind('REJECT_REQUEST', requestId, rejectedBy, `Rejected by ${approver.approver_name} (Level ${approver_level})`, clientIP).run();
+
+    return c.json({ success: true, message: 'Request rejected' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to reject request', error: error.message }, 500);
+  }
+});
+
+// ============================================
 // SYSTEM USERS MANAGEMENT (AUTHENTICATION)
 // ============================================
 

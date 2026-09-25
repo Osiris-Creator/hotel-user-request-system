@@ -115,6 +115,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       loadSystemUsers();
     } else if (tabName === 'programs') {
       loadProgramsManagement();
+    } else if (tabName === 'approvers') {
+      loadApprovalSettings();
     }
   });
 });
@@ -1176,6 +1178,107 @@ document.getElementById('role-modal-close')?.addEventListener('click', () => {
 document.getElementById('role-cancel-btn')?.addEventListener('click', () => {
   document.getElementById('role-modal').classList.remove('active');
 });
+
+// ============================================
+// APPROVAL SETTINGS MANAGEMENT
+// ============================================
+
+// Load approval settings
+async function loadApprovalSettings() {
+  try {
+    const response = await fetch(`${API_URL}/api/approval-settings`);
+    const data = await response.json();
+
+    if (data.success) {
+      const container = document.getElementById('approvers-list');
+
+      const levelNames = {
+        1: 'Approver 1 (First Review)',
+        2: 'Approver 2 (Second Review)',
+        3: 'Final Notification Email'
+      };
+
+      container.innerHTML = data.data.map(approver => `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-body">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
+              <div>
+                <h3 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--primary);">
+                  ${levelNames[approver.approver_level] || `Level ${approver.approver_level}`}
+                </h3>
+                <p style="margin: 0; color: var(--gray-600); font-size: 0.9rem;">
+                  ${approver.approver_level === 3 ? 'Receives final notification when all approvals are complete' : 'Reviews and approves requests'}
+                </p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="editApprover(${approver.approver_level}, '${approver.approver_name.replace(/'/g, "\\'")}', '${approver.approver_email}')">
+                ✏️ Edit
+              </button>
+            </div>
+            <div style="background: var(--gray-50); padding: 16px; border-radius: 8px;">
+              <div style="margin-bottom: 8px;">
+                <strong style="color: var(--gray-700);">Name:</strong>
+                <span style="margin-left: 8px;">${approver.approver_name}</span>
+              </div>
+              <div>
+                <strong style="color: var(--gray-700);">Email:</strong>
+                <span style="margin-left: 8px;">${approver.approver_email}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      showError('Unable to load approval settings');
+    }
+  } catch (error) {
+    console.error('Error loading approval settings:', error);
+    showError('An error occurred while loading approval settings');
+  }
+}
+
+// Edit approver
+window.editApprover = function(level, name, email) {
+  const levelNames = {
+    1: 'Approver 1',
+    2: 'Approver 2',
+    3: 'Final Notification Email'
+  };
+
+  const newName = prompt(`${levelNames[level]}\n\nEnter name:`, name);
+  if (!newName) return;
+
+  const newEmail = prompt(`${levelNames[level]}\n\nEnter email:`, email);
+  if (!newEmail) return;
+
+  updateApprover(level, newName, newEmail);
+};
+
+// Update approver
+async function updateApprover(level, name, email) {
+  try {
+    const response = await fetch(`${API_URL}/api/approval-settings/${level}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        approver_name: name,
+        approver_email: email,
+        updatedBy: currentUser.username
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Approval settings updated successfully');
+      loadApprovalSettings();
+    } else {
+      showError(data.message || 'Unable to update approval settings');
+    }
+  } catch (error) {
+    console.error('Error updating approval settings:', error);
+    showError('An error occurred while updating approval settings');
+  }
+}
 
 // Filter buttons
 document.getElementById('filter-btn')?.addEventListener('click', loadRequests);
