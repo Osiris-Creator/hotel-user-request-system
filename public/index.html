@@ -85,6 +85,9 @@
         <button class="tab-btn admin-only" data-tab="programs">
           💻 Programs & Roles
         </button>
+        <button class="tab-btn admin-only" data-tab="departments">
+          🏢 Departments
+        </button>
         <button class="tab-btn admin-only" data-tab="approvers">
           ✅ Approval Settings
         </button>
@@ -125,12 +128,14 @@
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="department">Department</label>
-                  <input type="text" id="department" name="department">
+                  <label for="department_select">Department *</label>
+                  <select id="department_select" name="department_select" required>
+                    <option value="">-- Select Department --</option>
+                  </select>
                 </div>
                 <div class="form-group">
-                  <label for="position">Position</label>
-                  <input type="text" id="position" name="position">
+                  <label for="position">Position *</label>
+                  <input type="text" id="position" name="position" required>
                 </div>
               </div>
             </div>
@@ -277,6 +282,28 @@
             <div class="loading">
               <div class="spinner"></div>
               <p>Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Departments Tab (Admin Only) -->
+      <div id="departments-tab" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">🏢 Department Heads Management</h2>
+          </div>
+
+          <div style="margin-top: 24px;">
+            <p style="color: var(--gray-600); margin-bottom: 24px;">
+              Configure the head of each department. When an employee submits a request, it will automatically be routed to their department head as <strong>Approver 1</strong>.
+            </p>
+
+            <div id="departments-list">
+              <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+              </div>
             </div>
           </div>
         </div>

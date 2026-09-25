@@ -77,6 +77,7 @@ function showApp() {
   }
 
   loadPrograms();
+  loadDepartments();
 }
 
 // Logout
@@ -115,6 +116,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       loadSystemUsers();
     } else if (tabName === 'programs') {
       loadProgramsManagement();
+    } else if (tabName === 'departments') {
+      loadDepartmentHeads();
     } else if (tabName === 'approvers') {
       loadApprovalSettings();
     }
@@ -145,6 +148,128 @@ async function loadPrograms() {
   } catch (error) {
     console.error('Error loading programs:', error);
     showError('An error occurred while loading data');
+  }
+}
+
+// Load departments
+async function loadDepartments() {
+  try {
+    const response = await fetch(`${API_URL}/api/departments`);
+    const data = await response.json();
+
+    if (data.success) {
+      const departmentSelect = document.getElementById('department_select');
+      if (departmentSelect) {
+        departmentSelect.innerHTML = '<option value="">-- Select Department --</option>' +
+          data.data.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+      }
+    }
+  } catch (error) {
+    console.error('Error loading departments:', error);
+  }
+}
+
+// Load department heads management
+async function loadDepartmentHeads() {
+  try {
+    const [departmentsRes, headsRes] = await Promise.all([
+      fetch(`${API_URL}/api/departments`),
+      fetch(`${API_URL}/api/department-heads`)
+    ]);
+
+    const departmentsData = await departmentsRes.json();
+    const headsData = await headsRes.json();
+
+    if (departmentsData.success && headsData.success) {
+      const departments = departmentsData.data;
+      const heads = headsData.data;
+
+      const container = document.getElementById('departments-list');
+
+      container.innerHTML = departments.map(dept => {
+        const head = heads.find(h => h.department_id === dept.id);
+        return `
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-body">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
+              <div>
+                <h3 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--primary);">
+                  ${dept.name}
+                </h3>
+                <p style="margin: 0; color: var(--gray-600); font-size: 0.9rem;">
+                  ${dept.description || 'Department'}
+                </p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="editDepartmentHead(${dept.id}, '${dept.name.replace(/'/g, "\\'")}', '${head?.head_name?.replace(/'/g, "\\'") || ''}', '${head?.head_email || ''}')">
+                ${head ? '✏️ Edit' : '➕ Set'} Head
+              </button>
+            </div>
+            ${head ? `
+            <div style="background: var(--gray-50); padding: 16px; border-radius: 8px;">
+              <div style="margin-bottom: 8px;">
+                <strong style="color: var(--gray-700);">Department Head:</strong>
+                <span style="margin-left: 8px;">${head.head_name}</span>
+              </div>
+              <div>
+                <strong style="color: var(--gray-700);">Email:</strong>
+                <span style="margin-left: 8px;">${head.head_email}</span>
+              </div>
+            </div>
+            ` : `
+            <div style="background: var(--yellow-50); padding: 12px; border-radius: 8px; border-left: 4px solid var(--yellow-500);">
+              <p style="margin: 0; color: var(--yellow-700); font-size: 0.9rem;">
+                ⚠️ No department head configured
+              </p>
+            </div>
+            `}
+          </div>
+        </div>
+      `;
+      }).join('');
+    } else {
+      showError('Unable to load departments');
+    }
+  } catch (error) {
+    console.error('Error loading department heads:', error);
+    showError('An error occurred while loading department heads');
+  }
+}
+
+// Edit department head
+window.editDepartmentHead = function(deptId, deptName, headName, headEmail) {
+  const newName = prompt(`${deptName} - Department Head\n\nEnter name:`, headName);
+  if (newName === null) return;
+
+  const newEmail = prompt(`${deptName} - Department Head\n\nEnter email:`, headEmail);
+  if (newEmail === null) return;
+
+  updateDepartmentHead(deptId, newName, newEmail);
+};
+
+// Update department head
+async function updateDepartmentHead(deptId, name, email) {
+  try {
+    const response = await fetch(`${API_URL}/api/department-heads/${deptId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        head_name: name,
+        head_email: email,
+        updatedBy: currentUser.username
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Department head updated successfully');
+      loadDepartmentHeads();
+    } else {
+      showError(data.message || 'Unable to update department head');
+    }
+  } catch (error) {
+    console.error('Error updating department head:', error);
+    showError('An error occurred while updating department head');
   }
 }
 
@@ -260,13 +385,17 @@ document.getElementById('create-request-form').addEventListener('submit', async 
     return;
   }
 
+  const departmentSelect = document.getElementById('department_select');
+  const departmentId = departmentSelect.value;
+  const departmentName = departmentSelect.options[departmentSelect.selectedIndex].text;
+
   const requestData = {
     user: {
       employee_id: formData.get('employee_id'),
       first_name: formData.get('first_name'),
       last_name: formData.get('last_name'),
       email: formData.get('email'),
-      department: formData.get('department'),
+      department: departmentName,
       position: formData.get('position')
     },
     requester: {
@@ -274,6 +403,7 @@ document.getElementById('create-request-form').addEventListener('submit', async 
       email: formData.get('requester_email')
     },
     programAccess: programAccess,
+    department_id: departmentId ? parseInt(departmentId) : null,
     notes: formData.get('notes')
   };
 

@@ -32,6 +32,61 @@ app.get('/api/programs', async (c) => {
   }
 });
 
+// Get all departments
+app.get('/api/departments', async (c) => {
+  try {
+    const departments = await c.env.DB.prepare('SELECT * FROM departments ORDER BY name').all();
+    return c.json({ success: true, data: departments.results });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to fetch departments', error: error.message }, 500);
+  }
+});
+
+// Get department heads
+app.get('/api/department-heads', async (c) => {
+  try {
+    const heads = await c.env.DB.prepare(
+      'SELECT dh.*, d.name as department_name FROM department_heads dh JOIN departments d ON dh.department_id = d.id ORDER BY d.name'
+    ).all();
+    return c.json({ success: true, data: heads.results });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to fetch department heads', error: error.message }, 500);
+  }
+});
+
+// Update department head
+app.patch('/api/department-heads/:departmentId', async (c) => {
+  try {
+    const departmentId = c.req.param('departmentId');
+    const { head_name, head_email, updatedBy } = await c.req.json();
+
+    // Check if department head exists
+    const existing = await c.env.DB.prepare(
+      'SELECT * FROM department_heads WHERE department_id = ?'
+    ).bind(departmentId).first();
+
+    if (existing) {
+      await c.env.DB.prepare(
+        'UPDATE department_heads SET head_name = ?, head_email = ? WHERE department_id = ?'
+      ).bind(head_name, head_email, departmentId).run();
+    } else {
+      await c.env.DB.prepare(
+        'INSERT INTO department_heads (department_id, head_name, head_email) VALUES (?, ?, ?)'
+      ).bind(departmentId, head_name, head_email).run();
+    }
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('UPDATE_DEPARTMENT_HEAD', updatedBy, `Updated department head for department ${departmentId}: ${head_name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Department head updated successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to update department head', error: error.message }, 500);
+  }
+});
+
 // Get roles for specific program
 app.get('/api/programs/:id/roles', async (c) => {
   try {
@@ -50,7 +105,7 @@ app.get('/api/programs/:id/roles', async (c) => {
 app.post('/api/requests', async (c) => {
   try {
     const body: CreateRequestBody = await c.req.json();
-    const { user, requester, programAccess, notes } = body;
+    const { user, requester, programAccess, notes, department_id } = body;
 
     // Generate request number
     const dateStr = new Date().toISOString().slice(0, 7).replace('-', '');
@@ -79,10 +134,10 @@ app.post('/api/requests', async (c) => {
       userId = userResult.meta.last_row_id;
     }
 
-    // Insert user request
+    // Insert user request with department
     const requestResult = await c.env.DB.prepare(
-      'INSERT INTO user_requests (request_number, user_id, requester_name, requester_email, notes) VALUES (?, ?, ?, ?, ?)'
-    ).bind(requestNumber, userId, requester.name, requester.email, notes || null).run();
+      'INSERT INTO user_requests (request_number, user_id, requester_name, requester_email, department_id, notes) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(requestNumber, userId, requester.name, requester.email, department_id || null, notes || null).run();
 
     const requestId = requestResult.meta.last_row_id;
 
@@ -91,6 +146,51 @@ app.post('/api/requests', async (c) => {
       await c.env.DB.prepare(
         'INSERT INTO request_access (request_id, program_id, role_id) VALUES (?, ?, ?)'
       ).bind(requestId, access.program_id, access.role_id).run();
+    }
+
+    // Get program names for email
+    const programs = await c.env.DB.prepare(
+      'SELECT p.name FROM request_access rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+    ).bind(requestId).all();
+
+    const programNames = programs.results.map((p: any) => p.name);
+    const employeeName = `${user.first_name} ${user.last_name}`;
+
+    // Determine the first approver in the chain (Approver 1)
+    // Priority: department head (if department has a configured head), otherwise first general approver
+    let firstApprover: { name: string; email: string } | null = null;
+
+    if (department_id) {
+      const departmentHead = await c.env.DB.prepare(
+        'SELECT * FROM department_heads WHERE department_id = ?'
+      ).bind(department_id).first();
+
+      if (departmentHead) {
+        firstApprover = { name: departmentHead.head_name as string, email: departmentHead.head_email as string };
+      }
+    }
+
+    // Fallback to first general approver if no department head
+    if (!firstApprover) {
+      const generalApprover = await c.env.DB.prepare(
+        'SELECT * FROM approval_settings ORDER BY approver_level LIMIT 1'
+      ).first();
+      if (generalApprover) {
+        firstApprover = { name: generalApprover.approver_name as string, email: generalApprover.approver_email as string };
+      }
+    }
+
+    // Create the first approval step (level 1) and notify
+    if (firstApprover) {
+      await c.env.DB.prepare(
+        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status) VALUES (?, ?, ?, ?, ?)'
+      ).bind(requestId, 1, firstApprover.name, firstApprover.email, 'pending').run();
+
+      await sendEmail({
+        to: firstApprover.email,
+        subject: `🔔 New Request ${requestNumber} - Approval Required`,
+        html: getApprovalRequestEmail(requestNumber, employeeName, programNames, firstApprover.name, 1)
+      });
     }
 
     // Log to audit
@@ -368,7 +468,7 @@ app.delete('/api/programs/:id', async (c) => {
 
     // Check if program is used in any requests
     const usedInRequests = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM request_programs WHERE program_id = ?'
+      'SELECT COUNT(*) as count FROM request_access WHERE program_id = ?'
     ).bind(programId).first();
 
     if (usedInRequests.count > 0) {
@@ -459,7 +559,7 @@ app.delete('/api/programs/:programId/roles/:roleId', async (c) => {
 
     // Check if role is used in any requests
     const usedInRequests = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM request_programs WHERE role_id = ?'
+      'SELECT COUNT(*) as count FROM request_access WHERE role_id = ?'
     ).bind(roleId).first();
 
     if (usedInRequests.count > 0) {
@@ -605,6 +705,7 @@ app.post('/api/requests/:id/approve', async (c) => {
   try {
     const requestId = c.req.param('id');
     const { approver_level, comments, approvedBy } = await c.req.json();
+    const currentLevel = parseInt(approver_level);
 
     // Get request details
     const request = await c.env.DB.prepare(
@@ -615,80 +716,81 @@ app.post('/api/requests/:id/approve', async (c) => {
       return c.json({ success: false, message: 'Request not found' }, 404);
     }
 
-    // Get approver settings
-    const approver = await c.env.DB.prepare(
-      'SELECT * FROM approval_settings WHERE approver_level = ?'
-    ).bind(approver_level).first();
+    // Find the pending approval step at this level
+    const currentStep = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? AND approver_level = ? AND status = ?'
+    ).bind(requestId, currentLevel, 'pending').first();
 
-    if (!approver) {
-      return c.json({ success: false, message: 'Approver not found' }, 404);
+    if (!currentStep) {
+      return c.json({ success: false, message: 'No pending approval at this level' }, 400);
     }
 
-    // Check if already approved at this level
-    const existing = await c.env.DB.prepare(
-      'SELECT * FROM approval_history WHERE request_id = ? AND approver_level = ?'
-    ).bind(requestId, approver_level).first();
-
-    if (existing) {
-      return c.json({ success: false, message: 'Already approved at this level' }, 400);
-    }
-
-    // Add approval record
+    // Mark current step as approved
     await c.env.DB.prepare(
-      'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status, comments, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(requestId, approver_level, approver.approver_name, approver.approver_email, 'approved', comments || '', new Date().toISOString()).run();
+      'UPDATE approval_history SET status = ?, comments = ?, approved_at = ? WHERE id = ?'
+    ).bind('approved', comments || '', new Date().toISOString(), currentStep.id).run();
 
-    // Get program names
+    // Get program names for email
     const programs = await c.env.DB.prepare(
-      'SELECT p.name FROM request_programs rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+      'SELECT p.name FROM request_access rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
     ).bind(requestId).all();
 
     const programNames = programs.results.map((p: any) => p.name);
     const employeeName = `${request.first_name} ${request.last_name}`;
 
-    // Get total approver count (excluding final notification)
-    const totalApprovers = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM approval_settings WHERE approver_level < (SELECT MAX(approver_level) FROM approval_settings)'
-    ).first();
+    // Build the approval chain
+    // approval_settings = general approvers + final notification (last entry)
+    const settingsResult = await c.env.DB.prepare(
+      'SELECT * FROM approval_settings ORDER BY approver_level'
+    ).all();
+    const settings = settingsResult.results;
+    const generalApprovers = settings.slice(0, Math.max(0, settings.length - 1));
+    const finalNotification = settings.length > 0 ? settings[settings.length - 1] : null;
 
-    // Check if all approvers have approved
-    const approvalCount = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM approval_history WHERE request_id = ? AND status = ?'
-    ).bind(requestId, 'approved').first();
+    // Get the level-1 approver to determine if it was a department head
+    const level1 = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? AND approver_level = 1'
+    ).bind(requestId).first();
 
+    const level1IsDeptHead = level1 && !generalApprovers.some(
+      (a: any) => a.approver_email === level1.approver_email
+    );
+
+    // Full chain of approvers who must approve (chain[i] = level i+1)
+    const chain = level1IsDeptHead
+      ? [{ approver_name: level1.approver_name, approver_email: level1.approver_email }, ...generalApprovers]
+      : [...generalApprovers];
+
+    const currentIndex = currentLevel - 1;
     let newStatus = request.status;
 
-    if (approvalCount.count >= totalApprovers.count) {
-      // All approvers approved
+    if (currentIndex + 1 < chain.length) {
+      // Route to next approver
+      const nextLevel = currentLevel + 1;
+      const nextApprover = chain[currentIndex + 1];
+
+      await c.env.DB.prepare(
+        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status) VALUES (?, ?, ?, ?, ?)'
+      ).bind(requestId, nextLevel, nextApprover.approver_name, nextApprover.approver_email, 'pending').run();
+
+      await sendEmail({
+        to: nextApprover.approver_email,
+        subject: `🔔 New Request ${request.request_number} - Approval Required`,
+        html: getApprovalRequestEmail(request.request_number, employeeName, programNames, nextApprover.approver_name, nextLevel)
+      });
+    } else {
+      // All approvers have approved
       newStatus = 'approved';
       await c.env.DB.prepare(
         'UPDATE user_requests SET status = ?, approved_by = ?, approved_date = ? WHERE id = ?'
       ).bind(newStatus, approvedBy, new Date().toISOString(), requestId).run();
 
       // Send final notification email
-      const finalNotification = await c.env.DB.prepare(
-        'SELECT * FROM approval_settings ORDER BY approver_level DESC LIMIT 1'
-      ).first();
-
       if (finalNotification) {
         await sendEmail({
           to: finalNotification.approver_email,
           subject: `✅ Request ${request.request_number} - Fully Approved`,
           html: getApprovalCompletedEmail(request.request_number, employeeName, programNames)
-        });
-      }
-    } else {
-      // Send email to next approver
-      const nextLevel = approver_level + 1;
-      const nextApprover = await c.env.DB.prepare(
-        'SELECT * FROM approval_settings WHERE approver_level = ?'
-      ).bind(nextLevel).first();
-
-      if (nextApprover) {
-        await sendEmail({
-          to: nextApprover.approver_email,
-          subject: `🔔 New Request ${request.request_number} - Approval Required`,
-          html: getApprovalRequestEmail(request.request_number, employeeName, programNames, nextApprover.approver_name, nextLevel)
         });
       }
     }
@@ -697,7 +799,7 @@ app.post('/api/requests/:id/approve', async (c) => {
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
-    ).bind('APPROVE_REQUEST', requestId, approvedBy, `Approved by ${approver.approver_name} (Level ${approver_level})`, clientIP).run();
+    ).bind('APPROVE_REQUEST', requestId, approvedBy, `Approved by ${currentStep.approver_name} (Level ${currentLevel})`, clientIP).run();
 
     return c.json({
       success: true,
@@ -715,20 +817,21 @@ app.post('/api/requests/:id/reject', async (c) => {
   try {
     const requestId = c.req.param('id');
     const { approver_level, comments, rejectedBy } = await c.req.json();
+    const currentLevel = parseInt(approver_level);
 
-    // Get approver settings
-    const approver = await c.env.DB.prepare(
-      'SELECT * FROM approval_settings WHERE approver_level = ?'
-    ).bind(approver_level).first();
+    // Find the pending approval step at this level
+    const currentStep = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? AND approver_level = ? AND status = ?'
+    ).bind(requestId, currentLevel, 'pending').first();
 
-    if (!approver) {
-      return c.json({ success: false, message: 'Approver not found' }, 404);
+    if (!currentStep) {
+      return c.json({ success: false, message: 'No pending approval at this level' }, 400);
     }
 
-    // Add rejection record
+    // Mark current step as rejected
     await c.env.DB.prepare(
-      'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status, comments, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(requestId, approver_level, approver.approver_name, approver.approver_email, 'rejected', comments || '', new Date().toISOString()).run();
+      'UPDATE approval_history SET status = ?, comments = ?, approved_at = ? WHERE id = ?'
+    ).bind('rejected', comments || '', new Date().toISOString(), currentStep.id).run();
 
     // Update request status
     await c.env.DB.prepare(
@@ -739,7 +842,7 @@ app.post('/api/requests/:id/reject', async (c) => {
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
-    ).bind('REJECT_REQUEST', requestId, rejectedBy, `Rejected by ${approver.approver_name} (Level ${approver_level})`, clientIP).run();
+    ).bind('REJECT_REQUEST', requestId, rejectedBy, `Rejected by ${currentStep.approver_name} (Level ${currentLevel})`, clientIP).run();
 
     return c.json({ success: true, message: 'Request rejected' });
   } catch (error) {

@@ -41,6 +41,7 @@ export interface CreateRequestBody {
     email: string;
   };
   programAccess: ProgramAccess[];
+  department_id?: number | null;
   notes?: string;
 }
 

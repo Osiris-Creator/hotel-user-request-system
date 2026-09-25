@@ -7,6 +7,26 @@ CREATE TABLE IF NOT EXISTS programs (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Create departments table
+CREATE TABLE IF NOT EXISTS departments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Create department_heads table (each department has one head)
+CREATE TABLE IF NOT EXISTS department_heads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL UNIQUE,
+  head_name TEXT NOT NULL,
+  head_email TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+);
+
 -- Create roles table
 CREATE TABLE IF NOT EXISTS roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +58,8 @@ CREATE TABLE IF NOT EXISTS user_requests (
   request_number TEXT NOT NULL UNIQUE,
   user_id INTEGER NOT NULL,
   requester_name TEXT NOT NULL,
-  requester_email TEXT NOT NULL,
+  requester_email TEXT,
+  department_id INTEGER,
   status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'completed')),
   request_date TEXT DEFAULT (datetime('now')),
   approved_by TEXT,
@@ -47,7 +68,8 @@ CREATE TABLE IF NOT EXISTS user_requests (
   notes TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (department_id) REFERENCES departments(id)
 );
 
 -- Create request_access table
