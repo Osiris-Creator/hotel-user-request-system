@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, CreateRequestBody, AuditLog } from './types';
+import { sendEmail, getApprovalRequestEmail, getApprovalCompletedEmail } from './email';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -507,6 +508,34 @@ app.get('/api/approval-settings', async (c) => {
   }
 });
 
+// Create new approver
+app.post('/api/approval-settings', async (c) => {
+  try {
+    const { approver_name, approver_email, createdBy } = await c.req.json();
+
+    // Get max level and add 1
+    const maxLevel = await c.env.DB.prepare(
+      'SELECT MAX(approver_level) as max_level FROM approval_settings'
+    ).first();
+
+    const newLevel = (maxLevel?.max_level || 0) + 1;
+
+    const result = await c.env.DB.prepare(
+      'INSERT INTO approval_settings (approver_level, approver_name, approver_email) VALUES (?, ?, ?)'
+    ).bind(newLevel, approver_name, approver_email).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('CREATE_APPROVER', createdBy, `Added approver level ${newLevel}: ${approver_name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Approver added successfully', id: result.meta.last_row_id, level: newLevel });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to add approver', error: error.message }, 500);
+  }
+});
+
 // Update approval settings
 app.patch('/api/approval-settings/:level', async (c) => {
   try {
@@ -526,6 +555,34 @@ app.patch('/api/approval-settings/:level', async (c) => {
     return c.json({ success: true, message: 'Approval settings updated successfully' });
   } catch (error) {
     return c.json({ success: false, message: 'Failed to update approval settings', error: error.message }, 500);
+  }
+});
+
+// Delete approver
+app.delete('/api/approval-settings/:level', async (c) => {
+  try {
+    const level = c.req.param('level');
+    const { deletedBy } = await c.req.json();
+
+    // Get approver name for audit
+    const approver = await c.env.DB.prepare(
+      'SELECT approver_name FROM approval_settings WHERE approver_level = ?'
+    ).bind(level).first();
+
+    // Delete approver
+    await c.env.DB.prepare(
+      'DELETE FROM approval_settings WHERE approver_level = ?'
+    ).bind(level).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('DELETE_APPROVER', deletedBy, `Deleted approver level ${level}: ${approver?.approver_name || 'Unknown'}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Approver deleted successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to delete approver', error: error.message }, 500);
   }
 });
 
@@ -551,7 +608,7 @@ app.post('/api/requests/:id/approve', async (c) => {
 
     // Get request details
     const request = await c.env.DB.prepare(
-      'SELECT * FROM user_requests WHERE id = ?'
+      'SELECT ur.*, u.first_name, u.last_name, u.employee_id FROM user_requests ur JOIN users u ON ur.user_id = u.id WHERE ur.id = ?'
     ).bind(requestId).first();
 
     if (!request) {
@@ -581,18 +638,59 @@ app.post('/api/requests/:id/approve', async (c) => {
       'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status, comments, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(requestId, approver_level, approver.approver_name, approver.approver_email, 'approved', comments || '', new Date().toISOString()).run();
 
-    // Check if all approvers have approved (level 1 and 2)
+    // Get program names
+    const programs = await c.env.DB.prepare(
+      'SELECT p.name FROM request_programs rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+    ).bind(requestId).all();
+
+    const programNames = programs.results.map((p: any) => p.name);
+    const employeeName = `${request.first_name} ${request.last_name}`;
+
+    // Get total approver count (excluding final notification)
+    const totalApprovers = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM approval_settings WHERE approver_level < (SELECT MAX(approver_level) FROM approval_settings)'
+    ).first();
+
+    // Check if all approvers have approved
     const approvalCount = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM approval_history WHERE request_id = ? AND status = ? AND approver_level IN (1, 2)'
+      'SELECT COUNT(*) as count FROM approval_history WHERE request_id = ? AND status = ?'
     ).bind(requestId, 'approved').first();
 
     let newStatus = request.status;
-    if (approvalCount.count >= 2) {
+
+    if (approvalCount.count >= totalApprovers.count) {
       // All approvers approved
       newStatus = 'approved';
       await c.env.DB.prepare(
         'UPDATE user_requests SET status = ?, approved_by = ?, approved_date = ? WHERE id = ?'
       ).bind(newStatus, approvedBy, new Date().toISOString(), requestId).run();
+
+      // Send final notification email
+      const finalNotification = await c.env.DB.prepare(
+        'SELECT * FROM approval_settings ORDER BY approver_level DESC LIMIT 1'
+      ).first();
+
+      if (finalNotification) {
+        await sendEmail({
+          to: finalNotification.approver_email,
+          subject: `✅ Request ${request.request_number} - Fully Approved`,
+          html: getApprovalCompletedEmail(request.request_number, employeeName, programNames)
+        });
+      }
+    } else {
+      // Send email to next approver
+      const nextLevel = approver_level + 1;
+      const nextApprover = await c.env.DB.prepare(
+        'SELECT * FROM approval_settings WHERE approver_level = ?'
+      ).bind(nextLevel).first();
+
+      if (nextApprover) {
+        await sendEmail({
+          to: nextApprover.approver_email,
+          subject: `🔔 New Request ${request.request_number} - Approval Required`,
+          html: getApprovalRequestEmail(request.request_number, employeeName, programNames, nextApprover.approver_name, nextLevel)
+        });
+      }
     }
 
     // Log to audit

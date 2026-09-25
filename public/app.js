@@ -1192,27 +1192,45 @@ async function loadApprovalSettings() {
     if (data.success) {
       const container = document.getElementById('approvers-list');
 
-      const levelNames = {
-        1: 'Approver 1 (First Review)',
-        2: 'Approver 2 (Second Review)',
-        3: 'Final Notification Email'
-      };
+      if (data.data.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--gray-500);">No approvers configured yet</p>';
+        return;
+      }
 
-      container.innerHTML = data.data.map(approver => `
+      // Determine if last item is final notification
+      const totalApprovers = data.data.length;
+
+      container.innerHTML = data.data.map((approver, index) => {
+        const isFinalNotification = (index === totalApprovers - 1);
+        const levelName = isFinalNotification
+          ? 'Final Notification Email'
+          : `Approver ${approver.approver_level}`;
+        const description = isFinalNotification
+          ? 'Receives final notification when all approvals are complete'
+          : 'Reviews and approves requests';
+
+        return `
         <div class="card" style="margin-bottom: 16px;">
           <div class="card-body">
             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
               <div>
                 <h3 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--primary);">
-                  ${levelNames[approver.approver_level] || `Level ${approver.approver_level}`}
+                  ${levelName}
                 </h3>
                 <p style="margin: 0; color: var(--gray-600); font-size: 0.9rem;">
-                  ${approver.approver_level === 3 ? 'Receives final notification when all approvals are complete' : 'Reviews and approves requests'}
+                  ${description}
                 </p>
               </div>
-              <button class="btn btn-secondary btn-sm" onclick="editApprover(${approver.approver_level}, '${approver.approver_name.replace(/'/g, "\\'")}', '${approver.approver_email}')">
-                ✏️ Edit
-              </button>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="editApprover(${approver.approver_level}, '${approver.approver_name.replace(/'/g, "\\'")}', '${approver.approver_email}')">
+                  ✏️ Edit
+                </button>
+                ${data.data.length > 1 ? `
+                <button class="btn btn-danger btn-sm" onclick="deleteApprover(${approver.approver_level}, '${approver.approver_name.replace(/'/g, "\\'")}')">
+                  🗑️ Delete
+                </button>
+                ` : ''}
+              </div>
             </div>
             <div style="background: var(--gray-50); padding: 16px; border-radius: 8px;">
               <div style="margin-bottom: 8px;">
@@ -1226,7 +1244,8 @@ async function loadApprovalSettings() {
             </div>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
     } else {
       showError('Unable to load approval settings');
     }
@@ -1236,21 +1255,82 @@ async function loadApprovalSettings() {
   }
 }
 
+// Add new approver
+document.getElementById('add-approver-btn')?.addEventListener('click', () => {
+  const name = prompt('Enter approver name:');
+  if (!name) return;
+
+  const email = prompt('Enter approver email:');
+  if (!email) return;
+
+  addApprover(name, email);
+});
+
+// Add approver
+async function addApprover(name, email) {
+  try {
+    const response = await fetch(`${API_URL}/api/approval-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        approver_name: name,
+        approver_email: email,
+        createdBy: currentUser.username
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Approver added successfully');
+      loadApprovalSettings();
+    } else {
+      showError(data.message || 'Unable to add approver');
+    }
+  } catch (error) {
+    console.error('Error adding approver:', error);
+    showError('An error occurred while adding approver');
+  }
+}
+
 // Edit approver
 window.editApprover = function(level, name, email) {
-  const levelNames = {
-    1: 'Approver 1',
-    2: 'Approver 2',
-    3: 'Final Notification Email'
-  };
-
-  const newName = prompt(`${levelNames[level]}\n\nEnter name:`, name);
+  const newName = prompt('Enter approver name:', name);
   if (!newName) return;
 
-  const newEmail = prompt(`${levelNames[level]}\n\nEnter email:`, email);
+  const newEmail = prompt('Enter approver email:', email);
   if (!newEmail) return;
 
   updateApprover(level, newName, newEmail);
+};
+
+// Delete approver
+window.deleteApprover = async function(level, name) {
+  if (!confirm(`Delete approver "${name}"?\n\nThis cannot be undone. Are you sure?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/approval-settings/${level}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deletedBy: currentUser.username
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess('✅ Approver deleted successfully');
+      loadApprovalSettings();
+    } else {
+      showError(data.message || 'Unable to delete approver');
+    }
+  } catch (error) {
+    console.error('Error deleting approver:', error);
+    showError('An error occurred while deleting approver');
+  }
 };
 
 // Update approver

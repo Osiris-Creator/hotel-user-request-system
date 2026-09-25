@@ -287,11 +287,12 @@
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">✅ Approval Workflow Settings</h2>
+            <button id="add-approver-btn" class="btn btn-primary">➕ Add Approver</button>
           </div>
 
           <div style="margin-top: 24px;">
             <p style="color: var(--gray-600); margin-bottom: 24px;">
-              Configure the approval workflow. Requests will be routed to Approver 1, then Approver 2, and finally a notification will be sent to the Final Email.
+              Configure the approval workflow. Requests will be routed sequentially to each approver. The last approver receives the final notification when all approvals are complete.
             </p>
 
             <div id="approvers-list">
