@@ -163,10 +163,10 @@ function addProgramAccess() {
       </select>
     </div>
     <div class="form-group" style="margin-bottom: 0;">
-      <label>Role</label>
-      <select class="role-select" data-index="${index}" required disabled>
-        <option value="">-- Select Role --</option>
-      </select>
+      <label>Roles (select multiple)</label>
+      <div class="role-checkboxes" data-index="${index}" style="border: 1px solid var(--gray-300); border-radius: 8px; padding: 12px; min-height: 50px; background: var(--gray-50);">
+        <p style="color: var(--gray-500); margin: 0; font-size: 0.9rem;">Select a program first</p>
+      </div>
     </div>
     <div class="form-group" style="margin-bottom: 0;">
       ${index > 0 ? '<button type="button" class="btn btn-danger btn-icon remove-program">🗑️</button>' : '<div style="width: 40px;"></div>'}
@@ -177,14 +177,12 @@ function addProgramAccess() {
 
   div.querySelector('.program-select').addEventListener('change', async (e) => {
     const programId = e.target.value;
-    const roleSelect = div.querySelector('.role-select');
+    const roleContainer = div.querySelector('.role-checkboxes');
 
     if (programId) {
-      roleSelect.disabled = false;
-      await loadRoles(programId, roleSelect);
+      await loadRolesCheckbox(programId, roleContainer);
     } else {
-      roleSelect.disabled = true;
-      roleSelect.innerHTML = '<option value="">-- Select Role --</option>';
+      roleContainer.innerHTML = '<p style="color: var(--gray-500); margin: 0; font-size: 0.9rem;">Select a program first</p>';
     }
   });
 
@@ -196,7 +194,27 @@ function addProgramAccess() {
   }
 }
 
-// Load roles
+// Load roles as checkboxes
+async function loadRolesCheckbox(programId, containerElement) {
+  try {
+    const program = programs.find(p => p.id == programId);
+    if (program && program.roles && program.roles.length > 0) {
+      containerElement.innerHTML = program.roles.map(r => `
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+          <input type="checkbox" value="${r.id}" class="role-checkbox" style="width: auto;">
+          <span>${r.role_name}</span>
+        </label>
+      `).join('');
+    } else {
+      containerElement.innerHTML = '<p style="color: var(--gray-500); margin: 0; font-size: 0.9rem;">No roles available</p>';
+    }
+  } catch (error) {
+    console.error('Error loading roles:', error);
+    containerElement.innerHTML = '<p style="color: var(--error); margin: 0; font-size: 0.9rem;">Error loading roles</p>';
+  }
+}
+
+// Load roles (old function for compatibility)
 async function loadRoles(programId, selectElement) {
   try {
     const program = programs.find(p => p.id == programId);
@@ -223,12 +241,14 @@ document.getElementById('create-request-form').addEventListener('submit', async 
 
   document.querySelectorAll('.program-access-item').forEach(item => {
     const programSelect = item.querySelector('.program-select');
-    const roleSelect = item.querySelector('.role-select');
+    const roleCheckboxes = item.querySelectorAll('.role-checkbox:checked');
 
-    if (programSelect.value && roleSelect.value) {
-      programAccess.push({
-        program_id: parseInt(programSelect.value),
-        role_id: parseInt(roleSelect.value)
+    if (programSelect.value && roleCheckboxes.length > 0) {
+      roleCheckboxes.forEach(checkbox => {
+        programAccess.push({
+          program_id: parseInt(programSelect.value),
+          role_id: parseInt(checkbox.value)
+        });
       });
     }
   });
