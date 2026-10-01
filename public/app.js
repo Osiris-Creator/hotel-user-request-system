@@ -186,7 +186,17 @@ async function loadDepartmentHeads() {
 
       const container = document.getElementById('departments-list');
 
-      container.innerHTML = departments.map(dept => {
+      // Add header with "Add Department" button
+      let html = `
+        <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;">
+          <h2 style="margin: 0;">Departments Management</h2>
+          <button class="btn btn-primary" onclick="showAddDepartmentDialog()">
+            ➕ Add Department
+          </button>
+        </div>
+      `;
+
+      html += departments.map(dept => {
         const head = heads.find(h => h.department_id === dept.id);
         return `
         <div class="card" style="margin-bottom: 16px;">
@@ -200,9 +210,14 @@ async function loadDepartmentHeads() {
                   ${dept.description || 'Department'}
                 </p>
               </div>
-              <button class="btn btn-secondary btn-sm" onclick="editDepartmentHead(${dept.id}, '${dept.name.replace(/'/g, "\\'")}', '${head?.head_name?.replace(/'/g, "\\'") || ''}', '${head?.head_email || ''}')">
-                ${head ? '✏️ Edit' : '➕ Set'} Head
-              </button>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="editDepartmentHead(${dept.id}, '${dept.name.replace(/'/g, "\\'")}', '${head?.head_name?.replace(/'/g, "\\'") || ''}', '${head?.head_email || ''}')">
+                  ${head ? '✏️ Edit' : '➕ Set'} Head
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="deleteDepartmentConfirm(${dept.id}, '${dept.name.replace(/'/g, "\\'")}')" style="background-color: var(--red-600); color: white; border: none;">
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
             ${head ? `
             <div style="background: var(--gray-50); padding: 16px; border-radius: 8px;">
@@ -226,6 +241,8 @@ async function loadDepartmentHeads() {
         </div>
       `;
       }).join('');
+
+      container.innerHTML = html;
     } else {
       showError('Unable to load departments');
     }
@@ -234,6 +251,78 @@ async function loadDepartmentHeads() {
     showError('An error occurred while loading department heads');
   }
 }
+
+// Show add department dialog
+window.showAddDepartmentDialog = function() {
+  const deptName = prompt('Enter department name:');
+  if (deptName === null || deptName.trim() === '') return;
+
+  const deptDesc = prompt(`Department: ${deptName}\n\nEnter description (optional):`, '');
+
+  addDepartment(deptName.trim(), deptDesc?.trim() || null);
+};
+
+// Add new department
+async function addDepartment(name, description) {
+  try {
+    const response = await fetch(`${API_URL}/api/departments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        description,
+        createdBy: 'admin'
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess(`Department "${name}" created successfully!`);
+      loadDepartmentHeads();
+      loadDepartments();
+    } else {
+      showError(data.message || 'Failed to create department');
+    }
+  } catch (error) {
+    console.error('Error creating department:', error);
+    showError('An error occurred while creating department');
+  }
+}
+
+// Delete department confirmation
+window.deleteDepartmentConfirm = function(deptId, deptName) {
+  if (confirm(`Are you sure you want to delete "${deptName}"?\n\nThis action cannot be undone.`)) {
+    deleteDepartment(deptId, deptName);
+  }
+};
+
+// Delete department
+async function deleteDepartment(deptId, deptName) {
+  try {
+    const response = await fetch(`${API_URL}/api/departments/${deptId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deletedBy: 'admin'
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showSuccess(`Department "${deptName}" deleted successfully!`);
+      loadDepartmentHeads();
+      loadDepartments();
+    } else {
+      showError(data.message || 'Failed to delete department');
+    }
+  } catch (error) {
+    console.error('Error deleting department:', error);
+    showError('An error occurred while deleting department');
+  }
+}
+
 
 // Edit department head
 window.editDepartmentHead = function(deptId, deptName, headName, headEmail) {
