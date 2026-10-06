@@ -1,6 +1,11 @@
 export interface Env {
   DB: D1Database;
   CORS_ORIGIN: string;
+  APP_URL: string;
+  // Endpoint of the external Gmail SMTP email server (Render)
+  EMAIL_SERVICE_URL?: string;
+  // Shared secret sent to that email server as X-Email-Token
+  EMAIL_API_TOKEN?: string;
 }
 
 export interface UserRequest {

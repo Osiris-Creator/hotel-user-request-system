@@ -1,9 +1,18 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { serveStatic } from 'hono/cloudflare-workers';
 import type { Env, CreateRequestBody, AuditLog } from './types';
-import { sendEmail, getApprovalRequestEmail, getApprovalCompletedEmail } from './email';
+import { sendEmail, getApprovalRequestEmail, getApprovalCompletedEmail, getApprovalNotificationEmail } from './email';
+import { generateRequestFormHtml, buildRequestFormAttachment } from './request-form';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Generate random token
+function generateToken(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 // CORS middleware
 app.use('*', cors());
@@ -51,6 +60,69 @@ app.get('/api/department-heads', async (c) => {
     return c.json({ success: true, data: heads.results });
   } catch (error) {
     return c.json({ success: false, message: 'Failed to fetch department heads', error: error.message }, 500);
+  }
+});
+
+// Add new department
+app.post('/api/departments', async (c) => {
+  try {
+    const { name, description, createdBy } = await c.req.json();
+
+    if (!name || name.trim() === '') {
+      return c.json({ success: false, message: 'Department name is required' }, 400);
+    }
+
+    const result = await c.env.DB.prepare(
+      'INSERT INTO departments (name, description, created_at, updated_at) VALUES (?, ?, datetime("now"), datetime("now"))'
+    ).bind(name.trim(), description?.trim() || null).run();
+
+    const departmentId = result.meta.last_row_id;
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('CREATE_DEPARTMENT', createdBy, `Created new department: ${name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Department created successfully', data: { id: departmentId, name, description } });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to create department', error: error.message }, 500);
+  }
+});
+
+// Delete department
+app.delete('/api/departments/:departmentId', async (c) => {
+  try {
+    const departmentId = c.req.param('departmentId');
+    const { deletedBy } = await c.req.json();
+
+    // Check if department has requests or approvals
+    const hasRequests = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM user_requests WHERE department_id = ?'
+    ).bind(departmentId).first();
+
+    if ((hasRequests?.count as number) > 0) {
+      return c.json({ success: false, message: 'Cannot delete department with existing requests' }, 400);
+    }
+
+    // Get department name for audit
+    const dept = await c.env.DB.prepare('SELECT name FROM departments WHERE id = ?').bind(departmentId).first();
+
+    // Delete department head if exists
+    await c.env.DB.prepare('DELETE FROM department_heads WHERE department_id = ?').bind(departmentId).run();
+
+    // Delete department
+    await c.env.DB.prepare('DELETE FROM departments WHERE id = ?').bind(departmentId).run();
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
+    ).bind('DELETE_DEPARTMENT', deletedBy, `Deleted department: ${dept?.name}`, clientIP).run();
+
+    return c.json({ success: true, message: 'Department deleted successfully' });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to delete department', error: error.message }, 500);
   }
 });
 
@@ -126,11 +198,11 @@ app.post('/api/requests', async (c) => {
       userId = existingUser.id as number;
       await c.env.DB.prepare(
         'UPDATE users SET first_name = ?, last_name = ?, email = ?, department = ?, position = ?, updated_at = datetime("now") WHERE id = ?'
-      ).bind(user.first_name, user.last_name, user.email, user.department, user.position, userId).run();
+      ).bind(user.first_name, user.last_name, user.email || null, user.department, user.position, userId).run();
     } else {
       const userResult = await c.env.DB.prepare(
         'INSERT INTO users (employee_id, first_name, last_name, email, department, position) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(user.employee_id, user.first_name, user.last_name, user.email, user.department, user.position).run();
+      ).bind(user.employee_id, user.first_name, user.last_name, user.email || null, user.department, user.position).run();
       userId = userResult.meta.last_row_id;
     }
 
@@ -182,14 +254,23 @@ app.post('/api/requests', async (c) => {
 
     // Create the first approval step (level 1) and notify
     if (firstApprover) {
+      const token = generateToken();
+
       await c.env.DB.prepare(
-        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status) VALUES (?, ?, ?, ?, ?)'
-      ).bind(requestId, 1, firstApprover.name, firstApprover.email, 'pending').run();
+        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, token, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(requestId, 1, firstApprover.name, firstApprover.email, token, 'pending').run();
+
+      const formAttachment = await buildRequestFormAttachment(c.env.DB, requestId, requestNumber);
 
       await sendEmail({
         to: firstApprover.email,
         subject: `🔔 New Request ${requestNumber} - Approval Required`,
-        html: getApprovalRequestEmail(requestNumber, employeeName, programNames, firstApprover.name, 1)
+        html: getApprovalRequestEmail(requestNumber, employeeName, programNames.join(', '), firstApprover.name, 1, token, c.env.APP_URL, requestId),
+        attachments: formAttachment ? [formAttachment] : undefined
+      }, {
+        APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
       });
     }
 
@@ -592,6 +673,404 @@ app.delete('/api/programs/:programId/roles/:roleId', async (c) => {
 });
 
 // ============================================
+// TOKEN-BASED APPROVAL (Email Link Approval)
+// ============================================
+
+// Token-based approval endpoint (GET: redirect to form, POST: process approval)
+app.get('/api/approve', async (c) => {
+  const token = c.req.query('token');
+  const action = c.req.query('action');
+
+  if (!token || !action) {
+    return c.html(`
+      <html>
+        <body style="font-family:sans-serif;text-align:center;padding:50px">
+          <h1>❌ Invalid Request</h1>
+          <p>Missing token or action parameter.</p>
+        </body>
+      </html>
+    `, 400);
+  }
+
+  // Find approval by token
+  const approval = await c.env.DB.prepare(
+    'SELECT ah.*, ur.request_number, ur.requester_name, u.first_name, u.last_name FROM approval_history ah JOIN user_requests ur ON ah.request_id = ur.id JOIN users u ON ur.user_id = u.id WHERE ah.token = ?'
+  ).bind(token).first();
+
+  if (!approval) {
+    return c.html(`
+      <html>
+        <body style="font-family:sans-serif;text-align:center;padding:50px">
+          <h1>❌ Invalid or Expired Token</h1>
+          <p>This approval link is no longer valid.</p>
+        </body>
+      </html>
+    `, 404);
+  }
+
+  if (approval.status !== 'pending') {
+    const statusText = approval.status === 'approved' ? '✅ Approved' : '❌ Rejected';
+    return c.html(`
+      <html>
+        <body style="font-family:sans-serif;text-align:center;padding:50px">
+          <h1>${statusText}</h1>
+          <p>This request has already been ${approval.status}.</p>
+          <p><small>Processed at: ${approval.approved_at || 'Unknown'}</small></p>
+        </body>
+      </html>
+    `, 400);
+  }
+
+  const actionText = action === 'approve' ? '✅ Approve' : '❌ Reject';
+  const actionColor = action === 'approve' ? '#16a34a' : '#dc2626';
+  const employeeName = `${approval.first_name} ${approval.last_name}`;
+
+  // Show confirmation form
+  return c.html(`
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${actionText} Request</title>
+        <style>
+          body { font-family: sans-serif; background: #f3f4f6; padding: 20px; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+          .header { background: ${actionColor}; color: white; padding: 30px; text-align: center; }
+          .content { padding: 30px; }
+          .info-box { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid ${actionColor}; }
+          .info-box p { margin: 8px 0; color: #333; }
+          .info-box strong { color: #1e3a5f; }
+          textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-family: sans-serif; font-size: 14px; resize: vertical; min-height: 100px; }
+          .btn { display: inline-block; background: ${actionColor}; color: white; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; border: none; cursor: pointer; }
+          .btn:hover { opacity: 0.9; }
+          .btn:disabled { background: #9ca3af; cursor: not-allowed; }
+          .form-group { margin-bottom: 20px; }
+          label { display: block; margin-bottom: 8px; font-weight: 600; color: #555; }
+          #loading { display: none; text-align: center; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1 style="margin:0;font-size:28px">${actionText} Request</h1>
+          </div>
+          <div class="content">
+            <div class="info-box">
+              <p><strong>Request Number:</strong> ${approval.request_number}</p>
+              <p><strong>Employee Name:</strong> ${employeeName}</p>
+              <p><strong>Requester:</strong> ${approval.requester_name}</p>
+              <p><strong>Your Role:</strong> Approver Level ${approval.approver_level}</p>
+            </div>
+
+            <form id="approvalForm" onsubmit="handleSubmit(event)">
+              <div class="form-group">
+                <label for="comment">Comment (Optional):</label>
+                <textarea id="comment" name="comment" placeholder="Add any comments or reasons for your decision..."></textarea>
+              </div>
+
+              <div style="text-align:center">
+                <button type="submit" class="btn" id="submitBtn">${actionText}</button>
+              </div>
+
+              <div id="loading">
+                <p>Processing...</p>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <script>
+          async function handleSubmit(e) {
+            e.preventDefault();
+
+            const btn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const comment = document.getElementById('comment').value;
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+              const response = await fetch('/api/approve?token=${token}&action=${action}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ comment })
+              });
+
+              const result = await response.json();
+
+              if (result.success) {
+                document.querySelector('.content').innerHTML = \`
+                  <div style="text-align:center;padding:40px 20px">
+                    <div style="font-size:64px;margin-bottom:20px">${action === 'approve' ? '✅' : '❌'}</div>
+                    <h2 style="color:${actionColor};margin:0 0 16px">Request ${action === 'approve' ? 'Approved' : 'Rejected'} Successfully</h2>
+                    <p style="color:#666">Thank you for your response.</p>
+                  </div>
+                \`;
+              } else {
+                alert('Error: ' + result.message);
+                btn.disabled = false;
+                loading.style.display = 'none';
+              }
+            } catch (error) {
+              alert('An error occurred. Please try again.');
+              btn.disabled = false;
+              loading.style.display = 'none';
+            }
+          }
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+// Get approval details by token (GET)
+app.get('/api/approve/details', async (c) => {
+  try {
+    const token = c.req.query('token');
+
+    if (!token) {
+      return c.json({ success: false, message: 'Missing token' }, 400);
+    }
+
+    // Find approval by token
+    const approval = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE token = ?'
+    ).bind(token).first();
+
+    if (!approval) {
+      return c.json({ success: false, message: 'Invalid or expired token' }, 404);
+    }
+
+    if (approval.status !== 'pending') {
+      return c.json({ success: false, message: `This approval has already been ${approval.status}` }, 400);
+    }
+
+    const requestId = approval.request_id;
+
+    // Get request details
+    const request = await c.env.DB.prepare(
+      'SELECT ur.*, u.first_name, u.last_name, u.employee_id, d.name as department_name FROM user_requests ur JOIN users u ON ur.user_id = u.id LEFT JOIN departments d ON u.department_id = d.id WHERE ur.id = ?'
+    ).bind(requestId).first();
+
+    if (!request) {
+      return c.json({ success: false, message: 'Request not found' }, 404);
+    }
+
+    // Get program names
+    const programs = await c.env.DB.prepare(
+      'SELECT p.name FROM request_access rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+    ).bind(requestId).all();
+
+    const programNames = programs.results.map((p: any) => p.name).join(', ');
+
+    return c.json({
+      success: true,
+      approval: {
+        approver_level: approval.approver_level,
+        approver_name: approval.approver_name,
+        approver_email: approval.approver_email,
+        status: approval.status
+      },
+      request: {
+        request_number: request.request_number,
+        employee_name: `${request.first_name} ${request.last_name}`,
+        employee_id: request.employee_id,
+        department: request.department_name,
+        programs: programNames,
+        status: request.status,
+        created_at: request.created_at
+      }
+    });
+  } catch (error) {
+    console.error('Get approval details error:', error);
+    return c.json({ success: false, message: 'Failed to get approval details', error: error.message }, 500);
+  }
+});
+
+// Process token-based approval (POST)
+app.post('/api/approve', async (c) => {
+  try {
+    const token = c.req.query('token');
+    const action = c.req.query('action');
+    const { comment } = await c.req.json();
+
+    if (!token || !action) {
+      return c.json({ success: false, message: 'Missing token or action' }, 400);
+    }
+
+    // Find approval by token
+    const approval = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE token = ?'
+    ).bind(token).first();
+
+    if (!approval) {
+      return c.json({ success: false, message: 'Invalid or expired token' }, 404);
+    }
+
+    if (approval.status !== 'pending') {
+      return c.json({ success: false, message: `Already ${approval.status}` }, 400);
+    }
+
+    const requestId = approval.request_id as number;
+    const currentLevel = approval.approver_level as number;
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+
+    // Update approval step
+    await c.env.DB.prepare(
+      'UPDATE approval_history SET status = ?, comments = ?, approved_at = ? WHERE id = ?'
+    ).bind(newStatus, comment || '', new Date().toISOString(), approval.id).run();
+
+    // Get request details
+    const request = await c.env.DB.prepare(
+      'SELECT ur.*, u.first_name, u.last_name FROM user_requests ur JOIN users u ON ur.user_id = u.id WHERE ur.id = ?'
+    ).bind(requestId).first();
+
+    if (!request) {
+      return c.json({ success: false, message: 'Request not found' }, 404);
+    }
+
+    const employeeName = `${request.first_name} ${request.last_name}`;
+
+    // Get program names
+    const programs = await c.env.DB.prepare(
+      'SELECT p.name FROM request_access rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+    ).bind(requestId).all();
+    const programNames = programs.results.map((p: any) => p.name).join(', ');
+
+    // Send notification to requester
+    if (request.requester_email) {
+      await sendEmail({
+        to: request.requester_email as string,
+        subject: `${action === 'approve' ? '✅' : '❌'} Request ${request.request_number} - Update`,
+        html: getApprovalNotificationEmail(
+          request.request_number as string,
+          employeeName,
+          `${approval.approver_name} (Approver Level ${currentLevel})`,
+          action === 'approve',
+          comment
+        )
+      }, {
+        APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+      });
+    }
+
+    if (action === 'reject') {
+      // Reject request immediately
+      await c.env.DB.prepare(
+        'UPDATE user_requests SET status = ? WHERE id = ?'
+      ).bind('rejected', requestId).run();
+
+      // Send final rejection email to the requester
+      if (request.requester_email) {
+        await sendEmail({
+          to: request.requester_email as string,
+          subject: `❌ Request ${request.request_number} - Rejected`,
+          html: getApprovalCompletedEmail(request.request_number as string, employeeName, programNames, false, c.env.APP_URL, requestId)
+        }, {
+          APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+        });
+      }
+
+      // Log to audit
+      const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+      await c.env.DB.prepare(
+        'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
+      ).bind('REJECT_REQUEST', requestId, approval.approver_name, `Rejected by ${approval.approver_name} via email (Level ${currentLevel})`, clientIP).run();
+
+      return c.json({ success: true, message: 'Request rejected' });
+    }
+
+    // If approved, check if all approvals are complete
+    const allApprovals = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? ORDER BY approver_level'
+    ).bind(requestId).all();
+
+    const allApproved = allApprovals.results.every((a: any) => a.status === 'approved');
+
+    if (allApproved) {
+      // All approvers approved
+      await c.env.DB.prepare(
+        'UPDATE user_requests SET status = ?, approved_by = ?, approved_date = ? WHERE id = ?'
+      ).bind('approved', approval.approver_name, new Date().toISOString(), requestId).run();
+
+      // Send final approval email to the requester first, then the final-notification recipient
+      const settingsResult = await c.env.DB.prepare(
+        'SELECT * FROM approval_settings ORDER BY approver_level'
+      ).all();
+      const finalNotification = settingsResult.results.length > 0 ? settingsResult.results[settingsResult.results.length - 1] : null;
+
+      const completionAttachment = await buildRequestFormAttachment(
+        c.env.DB, requestId, request.request_number as string
+      );
+
+      const completionRecipients = [
+        request.requester_email as string | null,
+        finalNotification ? (finalNotification as any).approver_email as string : null,
+      ].filter((e, idx, arr) => e && arr.indexOf(e) === idx) as string[];
+
+      for (const email of completionRecipients) {
+        await sendEmail({
+          to: email,
+          subject: `✅ Request ${request.request_number} - Fully Approved`,
+          html: getApprovalCompletedEmail(request.request_number as string, employeeName, programNames, true, c.env.APP_URL, requestId),
+          attachments: completionAttachment ? [completionAttachment] : undefined
+        }, {
+          APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+        });
+      }
+    } else {
+      // Find next pending approval
+      const nextStep = allApprovals.results.find((a: any) => a.status === 'pending' && a.approver_level > currentLevel);
+
+      if (nextStep) {
+        // Send email to next approver
+        const nextAttachment = await buildRequestFormAttachment(
+          c.env.DB, requestId, request.request_number as string
+        );
+
+        await sendEmail({
+          to: (nextStep as any).approver_email,
+          subject: `🔔 New Request ${request.request_number} - Approval Required`,
+          html: getApprovalRequestEmail(
+            request.request_number as string,
+            employeeName,
+            programNames,
+            (nextStep as any).approver_name,
+            (nextStep as any).approver_level,
+            (nextStep as any).token,
+            c.env.APP_URL,
+            requestId
+          ),
+          attachments: nextAttachment ? [nextAttachment] : undefined
+        }, {
+          APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+        });
+      }
+    }
+
+    // Log to audit
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
+    await c.env.DB.prepare(
+      'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
+    ).bind('APPROVE_REQUEST', requestId, approval.approver_name, `Approved by ${approval.approver_name} via email (Level ${currentLevel})`, clientIP).run();
+
+    return c.json({ success: true, message: 'Request approved successfully' });
+  } catch (error) {
+    console.error('Approval error:', error);
+    return c.json({ success: false, message: 'Failed to process approval', error: error.message }, 500);
+  }
+});
+
+// ============================================
 // APPROVAL WORKFLOW MANAGEMENT
 // ============================================
 
@@ -611,26 +1090,32 @@ app.get('/api/approval-settings', async (c) => {
 // Create new approver
 app.post('/api/approval-settings', async (c) => {
   try {
-    const { approver_name, approver_email, createdBy } = await c.req.json();
+    const { approver_level, approver_name, approver_email, createdBy } = await c.req.json();
 
-    // Get max level and add 1
-    const maxLevel = await c.env.DB.prepare(
-      'SELECT MAX(approver_level) as max_level FROM approval_settings'
-    ).first();
+    if (!approver_level || !approver_name || !approver_email) {
+      return c.json({ success: false, message: 'Missing required fields' }, 400);
+    }
 
-    const newLevel = (maxLevel?.max_level || 0) + 1;
+    // Check if level already exists
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM approval_settings WHERE approver_level = ?'
+    ).bind(approver_level).first();
+
+    if (existing) {
+      return c.json({ success: false, message: `Approver level ${approver_level} already exists` }, 400);
+    }
 
     const result = await c.env.DB.prepare(
-      'INSERT INTO approval_settings (approver_level, approver_name, approver_email) VALUES (?, ?, ?)'
-    ).bind(newLevel, approver_name, approver_email).run();
+      'INSERT INTO approval_settings (approver_level, approver_name, approver_email, is_active) VALUES (?, ?, ?, 1)'
+    ).bind(approver_level, approver_name, approver_email).run();
 
     // Log to audit
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
-    ).bind('CREATE_APPROVER', createdBy, `Added approver level ${newLevel}: ${approver_name}`, clientIP).run();
+    ).bind('CREATE_APPROVER', createdBy || 'System', `Added approver level ${approver_level}: ${approver_name}`, clientIP).run();
 
-    return c.json({ success: true, message: 'Approver added successfully', id: result.meta.last_row_id, level: newLevel });
+    return c.json({ success: true, message: 'Approver added successfully', id: result.meta.last_row_id, level: approver_level });
   } catch (error) {
     return c.json({ success: false, message: 'Failed to add approver', error: error.message }, 500);
   }
@@ -650,7 +1135,7 @@ app.patch('/api/approval-settings/:level', async (c) => {
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
-    ).bind('UPDATE_APPROVER', updatedBy, `Updated approver level ${level}: ${approver_name}`, clientIP).run();
+    ).bind('UPDATE_APPROVER', updatedBy || 'System', `Updated approver level ${level}: ${approver_name}`, clientIP).run();
 
     return c.json({ success: true, message: 'Approval settings updated successfully' });
   } catch (error) {
@@ -678,7 +1163,7 @@ app.delete('/api/approval-settings/:level', async (c) => {
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?)'
-    ).bind('DELETE_APPROVER', deletedBy, `Deleted approver level ${level}: ${approver?.approver_name || 'Unknown'}`, clientIP).run();
+    ).bind('DELETE_APPROVER', deletedBy || 'System', `Deleted approver level ${level}: ${approver?.approver_name || 'Unknown'}`, clientIP).run();
 
     return c.json({ success: true, message: 'Approver deleted successfully' });
   } catch (error) {
@@ -768,30 +1253,136 @@ app.post('/api/requests/:id/approve', async (c) => {
       // Route to next approver
       const nextLevel = currentLevel + 1;
       const nextApprover = chain[currentIndex + 1];
+      const nextToken = generateToken();
 
       await c.env.DB.prepare(
-        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, status) VALUES (?, ?, ?, ?, ?)'
-      ).bind(requestId, nextLevel, nextApprover.approver_name, nextApprover.approver_email, 'pending').run();
+        'INSERT INTO approval_history (request_id, approver_level, approver_name, approver_email, token, status) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(requestId, nextLevel, nextApprover.approver_name, nextApprover.approver_email, nextToken, 'pending').run();
+
+      const nextAttachment = await buildRequestFormAttachment(
+        c.env.DB, requestId, request.request_number as string
+      );
 
       await sendEmail({
-        to: nextApprover.approver_email,
+        to: nextApprover.approver_email as string,
         subject: `🔔 New Request ${request.request_number} - Approval Required`,
-        html: getApprovalRequestEmail(request.request_number, employeeName, programNames, nextApprover.approver_name, nextLevel)
+        html: getApprovalRequestEmail(request.request_number as string, employeeName, programNames.join(', '), nextApprover.approver_name as string, nextLevel, nextToken, c.env.APP_URL, requestId),
+        attachments: nextAttachment ? [nextAttachment] : undefined
+      }, {
+        APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
       });
+
+      // Notify the requester that this level approved
+      if (request.requester_email) {
+        await sendEmail({
+          to: request.requester_email as string,
+          subject: `✅ Request ${request.request_number} - Update`,
+          html: getApprovalNotificationEmail(
+            request.request_number as string,
+            employeeName,
+            `${currentStep.approver_name} (Approver Level ${currentLevel})`,
+            true,
+            comments
+          )
+        }, {
+          APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+        });
+      }
     } else {
       // All approvers have approved
       newStatus = 'approved';
       await c.env.DB.prepare(
         'UPDATE user_requests SET status = ?, approved_by = ?, approved_date = ? WHERE id = ?'
-      ).bind(newStatus, approvedBy, new Date().toISOString(), requestId).run();
+      ).bind(newStatus, approvedBy || 'System', new Date().toISOString(), requestId).run();
 
-      // Send final notification email
-      if (finalNotification) {
-        await sendEmail({
-          to: finalNotification.approver_email,
-          subject: `✅ Request ${request.request_number} - Fully Approved`,
-          html: getApprovalCompletedEmail(request.request_number, employeeName, programNames)
-        });
+      // Get all approvers in the chain to notify
+      const allApprovals = await c.env.DB.prepare(
+        'SELECT DISTINCT approver_email FROM approval_history WHERE request_id = ? ORDER BY approver_level'
+      ).bind(requestId).all();
+
+      const approverEmails = allApprovals.results.map((a: any) => a.approver_email);
+      const requesterEmail = await c.env.DB.prepare(
+        'SELECT u.email FROM users u WHERE u.id = ?'
+      ).bind(request.user_id).first();
+
+      // Create list of all people to notify (requester first)
+      const notifyEmails = [
+        request.requester_email,
+        requesterEmail?.email,
+        ...approverEmails,
+        finalNotification?.approver_email
+      ].filter((e, idx, arr) => e && arr.indexOf(e) === idx); // Remove duplicates
+
+      const auditLink = `${c.env.APP_URL}/api/requests/${requestId}/print-form`;
+
+      const completionAttachment = await buildRequestFormAttachment(
+        c.env.DB, requestId, request.request_number as string
+      );
+
+      // Send approval completed email to all involved parties
+      for (const email of notifyEmails) {
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: `✅ Request ${request.request_number} - Fully Approved and Completed`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #4caf50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                  <h1 style="margin: 0; font-size: 24px;">✅ REQUEST APPROVED</h1>
+                </div>
+                <div style="background: #f5f5f5; padding: 20px; border-radius: 0 0 8px 8px;">
+                  <p>Good news! The access request has been successfully approved and processed.</p>
+
+                  <div style="background: white; padding: 15px; border-left: 4px solid #4caf50; margin: 20px 0; border-radius: 4px;">
+                    <p><strong>Request Number:</strong> ${request.request_number}</p>
+                    <p><strong>Employee:</strong> ${employeeName}</p>
+                    <p><strong>Programs Requested:</strong> ${programNames.join(', ')}</p>
+                    <p><strong>Completion Date:</strong> ${new Date().toLocaleString()}</p>
+                  </div>
+
+                  <div style="background: white; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <h3 style="margin-top: 0;">Approval Chain Summary:</h3>
+                    <ol style="margin-bottom: 0;">
+                      ${allApprovals.results.map((a: any, idx: number) => `
+                        <li style="margin-bottom: 8px;">
+                          <strong>Level ${idx + 1}:</strong> Approved
+                        </li>
+                      `).join('')}
+                    </ol>
+                  </div>
+
+                  <p style="margin-top: 20px; color: #666; font-size: 14px;">
+                    <strong>📋 View Full Audit Trail:</strong><br>
+                    You can view the complete approval history and print the request form by clicking the button below:
+                  </p>
+
+                  <div style="text-align: center; margin: 20px 0;">
+                    <a href="${auditLink}" style="background: #2196F3; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                      📋 View Approval History & Print Form
+                    </a>
+                  </div>
+
+                  <p style="color: #666; font-size: 13px;">
+                    📎 The approved request form is attached. Open it and press Ctrl+P (Cmd+P) to save it as a PDF.
+                  </p>
+
+                  <p style="color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    This is an automated email from the User Access Request System. Please do not reply to this email.
+                  </p>
+                </div>
+              </div>
+            `,
+            attachments: completionAttachment ? [completionAttachment] : undefined
+          }, {
+            APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+          });
+        }
       }
     }
 
@@ -799,7 +1390,7 @@ app.post('/api/requests/:id/approve', async (c) => {
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     await c.env.DB.prepare(
       'INSERT INTO audit_log (action, request_id, changed_by, change_description, ip_address) VALUES (?, ?, ?, ?, ?)'
-    ).bind('APPROVE_REQUEST', requestId, approvedBy, `Approved by ${currentStep.approver_name} (Level ${currentLevel})`, clientIP).run();
+    ).bind('APPROVE_REQUEST', requestId, approvedBy || 'System', `Approved by ${currentStep.approver_name} (Level ${currentLevel})`, clientIP).run();
 
     return c.json({
       success: true,
@@ -837,6 +1428,52 @@ app.post('/api/requests/:id/reject', async (c) => {
     await c.env.DB.prepare(
       'UPDATE user_requests SET status = ? WHERE id = ?'
     ).bind('rejected', requestId).run();
+
+    // Notify the requester of the rejection
+    const rejectedRequest = await c.env.DB.prepare(
+      'SELECT ur.*, u.first_name, u.last_name FROM user_requests ur JOIN users u ON ur.user_id = u.id WHERE ur.id = ?'
+    ).bind(requestId).first();
+
+    if (rejectedRequest?.requester_email) {
+      const programs = await c.env.DB.prepare(
+        'SELECT p.name FROM request_access rp JOIN programs p ON rp.program_id = p.id WHERE rp.request_id = ? GROUP BY p.id'
+      ).bind(requestId).all();
+      const programNames = programs.results.map((p: any) => p.name).join(', ');
+      const employeeName = `${rejectedRequest.first_name} ${rejectedRequest.last_name}`;
+
+      await sendEmail({
+        to: rejectedRequest.requester_email as string,
+        subject: `❌ Request ${rejectedRequest.request_number} - Update`,
+        html: getApprovalNotificationEmail(
+          rejectedRequest.request_number as string,
+          employeeName,
+          `${currentStep.approver_name} (Approver Level ${currentLevel})`,
+          false,
+          comments
+        )
+      }, {
+        APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+      });
+
+      await sendEmail({
+        to: rejectedRequest.requester_email as string,
+        subject: `❌ Request ${rejectedRequest.request_number} - Rejected`,
+        html: getApprovalCompletedEmail(
+          rejectedRequest.request_number as string,
+          employeeName,
+          programNames,
+          false,
+          c.env.APP_URL,
+          requestId
+        )
+      }, {
+        APP_URL: c.env.APP_URL,
+        EMAIL_SERVICE_URL: c.env.EMAIL_SERVICE_URL,
+        EMAIL_API_TOKEN: c.env.EMAIL_API_TOKEN
+      });
+    }
 
     // Log to audit
     const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
@@ -1078,6 +1715,67 @@ app.delete('/api/system-users/:id', async (c) => {
     return c.json({ success: false, message: 'Failed to delete user', error: error.message }, 500);
   }
 });
+
+// Get approval history for a request
+app.get('/api/requests/:id/approval-history', async (c) => {
+  try {
+    const requestId = c.req.param('id');
+
+    const request = await c.env.DB.prepare(
+      `SELECT ur.*, d.name as department_name
+       FROM user_requests ur
+       LEFT JOIN departments d ON ur.department_id = d.id
+       WHERE ur.id = ?`
+    ).bind(requestId).first();
+
+    if (!request) {
+      return c.json({ success: false, message: 'Request not found' }, 404);
+    }
+
+    const approvals = await c.env.DB.prepare(
+      'SELECT * FROM approval_history WHERE request_id = ? ORDER BY approver_level'
+    ).bind(requestId).all();
+
+    const programAccess = await c.env.DB.prepare(
+      `SELECT p.name as program_name, r.role_name
+       FROM request_access ra
+       JOIN programs p ON ra.program_id = p.id
+       JOIN roles r ON ra.role_id = r.id
+       WHERE ra.request_id = ?`
+    ).bind(requestId).all();
+
+    return c.json({
+      success: true,
+      request: {
+        ...request,
+        programAccess: programAccess.results || []
+      },
+      approvals: approvals.results || []
+    });
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to get approval history', error: error.message }, 500);
+  }
+});
+
+// Generate printable approval form
+app.get('/api/requests/:id/print-form', async (c) => {
+  try {
+    const requestId = c.req.param('id');
+    const htmlContent = await generateRequestFormHtml(c.env.DB, requestId);
+
+    if (!htmlContent) {
+      return c.json({ success: false, message: 'Request not found' }, 404);
+    }
+
+    // Return HTML for browser to render and print
+    return c.html(htmlContent);
+  } catch (error) {
+    return c.json({ success: false, message: 'Failed to generate print form', error: error.message }, 500);
+  }
+});
+
+// Serve static files from public directory (after all API routes)
+app.use('/*', serveStatic({ namespace: 'ASSETS' }));
 
 // 404 handler
 app.notFound((c) => {

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: avani-email-server
+    runtime: node
+    plan: free
+    rootDir: email-server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: EMAIL_API_TOKEN
+        sync: false

@@ -1,0 +1,17 @@
+{
+  "name": "avani-email-server",
+  "version": "1.0.0",
+  "description": "Gmail SMTP email server for the AVANI+ User Request System",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "nodemailer": "6.9.16"
+  }
+}

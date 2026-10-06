@@ -1,13 +1,36 @@
 name = "hotel-user-request-system"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
+account_id = "891c07078312c2039e045e2b4cd0767d"
+
+# Assets binding for serving static files
+[assets]
+binding = "ASSETS"
+directory = "public"
 
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
 database_name = "hotel-user-request-db"
-database_id = "b3f853eb-6ea4-4c26-805d-dde2a2e0a4d0"
+database_id = "acba18a1-9bce-43f0-ba33-43d4fccca480"
 
-# CORS settings
+# Environment variables
 [vars]
 CORS_ORIGIN = "*"
+APP_URL = "https://hotel-user-request-system.vsam.workers.dev"
+
+# Local development overrides (set in .dev.vars)
+# APP_URL = "http://localhost:8787"
+
+# Production Environment
+[env.production]
+name = "hotel-user-request-system-production"
+
+[env.production.vars]
+CORS_ORIGIN = "*"
+APP_URL = "https://hotel-user-request-system.vsam.workers.dev"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "hotel-user-request-db"
+database_id = "acba18a1-9bce-43f0-ba33-43d4fccca480"
