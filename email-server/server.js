@@ -23,6 +23,10 @@ function getTransporter() {
       auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
       pool: true,
       maxConnections: 3,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+      tls: { rejectUnauthorized: false },
     });
   }
   return transporter;
